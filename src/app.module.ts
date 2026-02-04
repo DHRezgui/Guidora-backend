@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -12,7 +13,7 @@ import { ConfigModule } from '@nestjs/config';
       type: 'postgres',
       host: process.env.DB_HOST || 'localhost',
       port: parseInt(process.env.DB_PORT || '5432', 10),
-      username: process.env.DB_USER || 'dhia',
+      username: process.env.DB_USER || 'admin',
       password: process.env.DB_PASSWORD || 'password123',
       database: process.env.DB_NAME || 'onboarding',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
@@ -20,5 +21,7 @@ import { ConfigModule } from '@nestjs/config';
       logging: process.env.NODE_ENV === 'development',
     }),
   ],
+  controllers: [AppController],  
+  providers: [],
 })
 export class AppModule {}
