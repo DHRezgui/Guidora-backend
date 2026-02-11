@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
@@ -17,9 +18,11 @@ import { AppController } from './app.controller';
       password: process.env.DB_PASSWORD || 'password123',
       database: process.env.DB_NAME || 'onboarding',
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: process.env.NODE_ENV === 'development',
+      synchronize: false,
       logging: process.env.NODE_ENV === 'development',
+      uuidExtension: 'pgcrypto',
     }),
+    UserModule,
   ],
   controllers: [AppController],  
   providers: [],
