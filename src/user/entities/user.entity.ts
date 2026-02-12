@@ -15,7 +15,7 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true, nullable: false, name: 'email' })
   email: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: false, name: 'password' })  
+  @Column({ type: 'varchar', length: 255, nullable: false, name: 'password_hash' })  
   password: string;  
 
   @Column({ type: 'varchar', length: 100, name: 'first_name', nullable: true })
@@ -34,7 +34,7 @@ export class User {
   })
   role: UserRole;
 
-  @Column({ type: 'boolean', name: 'is_active', default: true })
+  @Column({ type: 'boolean', name: 'is_active', default: false })
   isActive: boolean;
 
   @Column({ type: 'timestamptz', name: 'last_login_at', nullable: true })

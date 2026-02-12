@@ -1,5 +1,5 @@
 import { 
-  Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+  Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, ParseUUIDPipe} from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -46,7 +46,7 @@ export class UserController {
 
   @Get(':id')
   @HttpCode(HttpStatus.OK)
-  async findById(@Param('id') id: string) {
+  async findById(@Param('id', new ParseUUIDPipe()) id: string) {
     const user = await this.userService.findById(id);
     return {
       success: true,
@@ -58,7 +58,7 @@ export class UserController {
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   async update(
-    @Param('id') id: string, 
+    @Param('id', new ParseUUIDPipe()) id: string, 
     @Body() updateUserDto: UpdateUserDto
   ) {
     const user = await this.userService.update(id, updateUserDto);
@@ -70,9 +70,20 @@ export class UserController {
   }
 
   
+  @Post(':id/logout')
+  @HttpCode(HttpStatus.OK)
+  async logout(@Param('id', new ParseUUIDPipe()) id: string) {
+    const user = await this.userService.logout(id);
+    return {
+      success: true,
+      message: 'Déconnexion réussie',
+      user,
+    };
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  async delete(@Param('id') id: string) {
+  async delete(@Param('id', new ParseUUIDPipe()) id: string) {
     await this.userService.delete(id);
     return {
       success: true,

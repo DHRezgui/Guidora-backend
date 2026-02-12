@@ -39,9 +39,10 @@ export class UserService {
     }
 
     const user = this.userRepository.create(createUserDto);
+    user.isActive = false;
     const savedUser = await this.userRepository.save(user);
 
-    // ✅ Retourner SANS le password
+    // Retourner SANS le password
     return this.toUserResponse(savedUser);
   }
 
@@ -107,7 +108,7 @@ export class UserService {
     return this.toUserResponse(updatedUser);
   }
 
-  // ✅ Supprimer avec vérification
+  // Supprimer avec vérification
   async delete(id: string): Promise<void> {
     const user = await this.userRepository.findOne({ where: { id } });
 
@@ -118,7 +119,7 @@ export class UserService {
     await this.userRepository.remove(user);
   }
 
-  // ✅ Valider le password (pour login)
+  //  Valider le password (pour login)
   async validatePassword(userId: string, password: string): Promise<boolean> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     
@@ -129,7 +130,7 @@ export class UserService {
     return user.validatePassword(password);
   }
 
-  // ✅ Login complet
+  //  Login complet
   async login(loginUserDto: LoginUserDto): Promise<UserResponse> {
     const user = await this.findByEmail(loginUserDto.email);
 
@@ -144,6 +145,21 @@ export class UserService {
     }
 
     user.lastLoginAt = new Date();
+    user.isActive = true;
+    const updatedUser = await this.userRepository.save(user);
+
+    return this.toUserResponse(updatedUser);
+  }
+
+  //  Logout - Désactiver l'utilisateur
+  async logout(id: string): Promise<UserResponse> {
+    const user = await this.userRepository.findOne({ where: { id } });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    user.isActive = false;
     const updatedUser = await this.userRepository.save(user);
 
     return this.toUserResponse(updatedUser);
