@@ -1,0 +1,165 @@
+import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Organization } from './entities/organization.entity';
+import { CreateOrganizationDto } from './dto/create-organization.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import { OrganizationResponse } from './types/organization-response.type';
+
+@Injectable()
+export class OrganizationService {
+  constructor(
+    @InjectRepository(Organization)
+    private readonly organizationRepository: Repository<Organization>,
+  ) {}
+
+  private toOrganizationResponse(org: Organization): OrganizationResponse {
+    return {
+      id: org.id,
+      name: org.name,
+      apiKey: org.apiKey,
+      plan: org.plan,
+      domain: org.domain,
+      settings: org.settings,
+      maxTours: org.maxTours,
+      maxUsers: org.maxUsers,
+      isActive: org.isActive,
+      createdAt: org.createdAt,
+      updatedAt: org.updatedAt,
+    };
+  }
+
+  // Créer une organisation
+  async create(createOrganizationDto: CreateOrganizationDto): Promise<OrganizationResponse> {
+    // Vérifier si l'apiKey existe déjà
+    const existingOrg = await this.organizationRepository.findOne({
+      where: { apiKey: createOrganizationDto.apiKey },
+    });
+
+    if (existingOrg) {
+      throw new HttpException('Cette clé API est déjà utilisée', HttpStatus.CONFLICT);
+    }
+
+    const organization = this.organizationRepository.create(createOrganizationDto);
+    const savedOrg = await this.organizationRepository.save(organization);
+
+    return this.toOrganizationResponse(savedOrg);
+  }
+
+  // Récupérer toutes les organisations
+  async findAll(): Promise<OrganizationResponse[]> {
+    const organizations = await this.organizationRepository.find({
+      order: { createdAt: 'DESC' },
+    });
+
+    return organizations.map(org => this.toOrganizationResponse(org));
+  }
+
+  // Récupérer une organisation par ID
+  async findById(id: string): Promise<OrganizationResponse> {
+    const organization = await this.organizationRepository.findOne({
+      where: { id },
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    return this.toOrganizationResponse(organization);
+  }
+
+  // Récupérer une organisation par API Key
+  async findByApiKey(apiKey: string): Promise<Organization | null> {
+    return this.organizationRepository.findOne({ where: { apiKey } });
+  }
+
+  // Récupérer une organisation avec ses utilisateurs
+  async findByIdWithUsers(id: string): Promise<Organization> {
+    const organization = await this.organizationRepository.findOne({
+      where: { id },
+      relations: ['users'],
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    return organization;
+  }
+
+  // Mettre à jour une organisation
+  async update(id: string, updateOrganizationDto: UpdateOrganizationDto): Promise<OrganizationResponse> {
+    const organization = await this.organizationRepository.findOne({ where: { id } });
+
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    // Vérifier l'apiKey unique si changement
+    if (updateOrganizationDto.apiKey && updateOrganizationDto.apiKey !== organization.apiKey) {
+      const existingOrg = await this.organizationRepository.findOne({
+        where: { apiKey: updateOrganizationDto.apiKey },
+      });
+
+      if (existingOrg) {
+        throw new HttpException('Cette clé API est déjà utilisée', HttpStatus.CONFLICT);
+      }
+    }
+
+    // Appliquer les modifications
+    Object.assign(organization, updateOrganizationDto);
+    const updatedOrg = await this.organizationRepository.save(organization);
+
+    return this.toOrganizationResponse(updatedOrg);
+  }
+
+  // Supprimer une organisation
+  async delete(id: string): Promise<void> {
+    const organization = await this.organizationRepository.findOne({ where: { id } });
+
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    await this.organizationRepository.remove(organization);
+  }
+
+  // Compter le nombre d'utilisateurs dans une organisation
+  async countUsers(id: string): Promise<number> {
+    const organization = await this.findByIdWithUsers(id);
+    return organization.users ? organization.users.length : 0;
+  }
+
+  // Vérifier si une organisation a atteint sa limite d'utilisateurs
+  async hasReachedUserLimit(id: string): Promise<boolean> {
+    const organization = await this.organizationRepository.findOne({ where: { id } });
+    
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    const userCount = await this.countUsers(id);
+    return userCount >= organization.maxUsers;
+  }
+
+  // Supprimer avec désassignation des users
+  async deleteWithUsers(id: string): Promise<{ usersAffected: number }> {
+    const organization = await this.organizationRepository.findOne({
+      where: { id },
+      relations: ['users'],
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+
+    // Désassigner tous les users
+    const usersAffected = organization.users?.length || 0;
+    
+    // Les users seront automatiquement désassignés grâce à ON DELETE SET NULL dans SQL
+    await this.organizationRepository.remove(organization);
+
+    return { usersAffected };
+  }
+
+}

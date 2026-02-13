@@ -90,4 +90,32 @@ export class UserController {
       message: 'Utilisateur supprimé avec succès',
     };
   }
+
+  // Assigner à une organisation
+  @Post(':id/assign-organization')
+  @HttpCode(HttpStatus.OK)
+  async assignToOrganization(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('organizationName') organizationName: string,
+  ) {
+    const user = await this.userService.assignToOrganization(id, organizationName);
+    return {
+      success: true,
+      message: 'Utilisateur assigné à l\'organisation avec succès',
+      user,
+    };
+  }
+
+  // Désassigner d'une organisation
+  @Post(':id/remove-organization')
+  @HttpCode(HttpStatus.OK)
+  async removeFromOrganization(@Param('id', ParseUUIDPipe) id: string) {
+    const user = await this.userService.removeFromOrganization(id);
+    return {
+      success: true,
+      message: 'Utilisateur retiré de l\'organisation avec succès',
+      user,
+    };
+  }
+
 }

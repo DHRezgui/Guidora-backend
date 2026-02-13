@@ -6,12 +6,14 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { UserResponse } from './types/user-response.type';
+import { OrganizationService } from 'src/organization/organization.service';
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly organizationService: OrganizationService,
   ) {}
 
 
@@ -22,14 +24,18 @@ export class UserService {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      organizationId: user.organizationId,
       isActive: user.isActive,
+      emailVerified: user.emailVerified,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
   }
   
+  // Register et gérer l'assignation 
   async create(createUserDto: CreateUserDto): Promise<UserResponse> {
+    // Vérifier si l'email existe déjà
     const existingUser = await this.userRepository.findOne({
       where: { email: createUserDto.email },
     });
@@ -38,18 +44,49 @@ export class UserService {
       throw new HttpException('Cet email est déjà utilisé', HttpStatus.CONFLICT);
     }
 
-    const user = this.userRepository.create(createUserDto);
-    user.isActive = false;
+    let organizationId: string | undefined = createUserDto.organizationId;
+
+    // Si organizationName est fourni, trouver l'organisation par nom
+    if (createUserDto.organizationName && !organizationId) {
+      const organizations = await this.organizationService.findAll();
+      const organization = organizations.find(
+        org => org.name.toLowerCase() === createUserDto.organizationName?.toLowerCase()
+      );
+
+      if (!organization) {
+        throw new HttpException(
+          `Organisation "${createUserDto.organizationName}" introuvable`,
+          HttpStatus.NOT_FOUND
+        );
+      }
+
+      organizationId = organization.id;
+
+      // Vérifier si l'organisation a atteint sa limite d'utilisateurs
+      const hasReachedLimit = await this.organizationService.hasReachedUserLimit(organizationId);
+      if (hasReachedLimit) {
+        throw new HttpException(
+          'Cette organisation a atteint sa limite d\'utilisateurs',
+          HttpStatus.FORBIDDEN
+        );
+      }
+    }
+
+    // Créer le user avec l'organizationId trouvé ou fourni
+    const user = this.userRepository.create({
+      ...createUserDto,
+      organizationId,
+    });
+
     const savedUser = await this.userRepository.save(user);
 
-    // Retourner SANS le password
     return this.toUserResponse(savedUser);
   }
 
   // Utilisateurs SANS password
   async findAll(): Promise<UserResponse[]> {
     const users = await this.userRepository.find({
-      select: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'createdAt', 'lastLoginAt'],
+      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt'],
     });
     return users.map(user => this.toUserResponse(user));
   }
@@ -58,7 +95,7 @@ export class UserService {
   async findById(id: string): Promise<UserResponse> {
     const user = await this.userRepository.findOne({
       where: { id },
-      select: ['id', 'email', 'firstName', 'lastName', 'role', 'isActive', 'createdAt', 'lastLoginAt'],
+      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt'],
     });
 
     if (!user) {
@@ -71,6 +108,16 @@ export class UserService {
   // Récupérer par email AVEC password (pour login uniquement)
   async findByEmail(email: string): Promise<User | null> {
     return this.userRepository.findOne({ where: { email } });
+  }
+
+  // Récupérer les users d'une organisation sans password
+  async findByOrganization(organizationId: string): Promise<UserResponse[]> {
+  const users = await this.userRepository.find({
+    where: { organizationId },
+    select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt', 'updatedAt'],
+  });
+
+    return users.map(user => this.toUserResponse(user));
   }
 
   //  Mettre à jour avec validation et hashage du password
@@ -164,4 +211,74 @@ export class UserService {
 
     return this.toUserResponse(updatedUser);
   }
+
+  // Assigner un utilisateur à une organisation
+  async assignToOrganization(userId: string, organizationName: string): Promise<UserResponse> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    // Trouver l'organisation par nom
+    const organizations = await this.organizationService.findAll();
+    const organization = organizations.find(
+      org => org.name.toLowerCase() === organizationName.toLowerCase()
+    );
+
+    if (!organization) {
+      throw new HttpException(
+        `Organisation "${organizationName}" introuvable`,
+        HttpStatus.NOT_FOUND
+      );
+    }
+
+    // Vérifier la limite d'utilisateurs
+    const hasReachedLimit = await this.organizationService.hasReachedUserLimit(organization.id);
+    if (hasReachedLimit) {
+      throw new HttpException(
+        'Cette organisation a atteint sa limite d\'utilisateurs',
+        HttpStatus.FORBIDDEN
+      );
+    }
+
+    // Assigner
+    user.organizationId = organization.id;
+    const updatedUser = await this.userRepository.save(user);
+
+    return this.toUserResponse(updatedUser);
+  }
+
+  // Désassigner un utilisateur d'une organisation
+  async removeFromOrganization(userId: string): Promise<UserResponse> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (!user.organizationId) {
+      throw new HttpException(
+        'Cet utilisateur n\'appartient à aucune organisation',
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Désassigner
+    user.organizationId = null;
+    const updatedUser = await this.userRepository.save(user);
+
+    return this.toUserResponse(updatedUser);
+  }
+
+  // Désassigner tous les users d'une organisation (utile si l'org ferme)
+  async removeAllUsersFromOrganization(organizationId: string): Promise<number> {
+    const result = await this.userRepository.update(
+      { organizationId },
+      { organizationId: null }
+    );
+
+    return result.affected || 0;
+  }
+
 }

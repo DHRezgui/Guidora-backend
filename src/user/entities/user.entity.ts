@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, BeforeInsert, BeforeUpdate } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, BeforeInsert, BeforeUpdate, JoinColumn, ManyToOne } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { Organization } from 'src/organization/entities/organization.entity';
 
 export enum UserRole {
   ADMIN = 'ADMIN',
@@ -34,8 +35,18 @@ export class User {
   })
   role: UserRole;
 
+  @Column({ type: 'uuid', name: 'organization_id', nullable: true })
+  organizationId: string | null;
+
+  @ManyToOne(() => Organization, (org) => org.users, { nullable: true })
+  @JoinColumn({ name: 'organization_id' })
+  organization: Organization;
+
   @Column({ type: 'boolean', name: 'is_active', default: false })
   isActive: boolean;
+
+  @Column({ type: 'boolean', name: 'email_verified', default: false })
+  emailVerified: boolean;
 
   @Column({ type: 'timestamptz', name: 'last_login_at', nullable: true })
   lastLoginAt: Date;

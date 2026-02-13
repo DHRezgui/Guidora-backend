@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, MaxLength, IsOptional, IsEnum, IsBoolean } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsOptional, IsEnum, IsBoolean, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { UserRole } from '../entities/user.entity';
 
@@ -27,6 +27,15 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(UserRole, { message: 'Le rôle doit être ADMIN, DEVELOPER ou USER' })
   role?: UserRole;
+
+  @IsOptional()
+  @IsUUID()
+  organizationId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => value?.trim())
+  organizationName?: string;
 
   @IsOptional()
   @IsBoolean()
