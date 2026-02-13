@@ -4,6 +4,7 @@ import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
+import { UserRole } from './entities/user.entity';
 
 @Controller('user')  
 export class UserController {
@@ -37,6 +38,31 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   async findAll() {
     const users = await this.userService.findAll();
+    return {
+      success: true,
+      count: users.length,
+      users,
+    };
+  }
+
+
+  // Utilisateurs par rôle
+  @Get('role/:role')
+  @HttpCode(HttpStatus.OK)
+  async findByRole(@Param('role') role: UserRole) {
+    const users = await this.userService.findByRole(role);
+    return {
+      success: true,
+      count: users.length,
+      users,
+    };
+  }
+
+  // Utilisateurs actifs
+  @Get('active')
+  @HttpCode(HttpStatus.OK)
+  async findActiveUsers() {
+    const users = await this.userService.findActiveUsers();
     return {
       success: true,
       count: users.length,

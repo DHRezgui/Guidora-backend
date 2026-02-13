@@ -1,12 +1,12 @@
 import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { UserResponse } from './types/user-response.type';
-import { OrganizationService } from 'src/organization/organization.service';
+import { OrganizationService } from '../organization/organization.service';
 
 @Injectable()
 export class UserService {
@@ -211,6 +211,26 @@ export class UserService {
 
     return this.toUserResponse(updatedUser);
   }
+
+  // Trouver par rôle SANS password
+  async findByRole(role: UserRole): Promise<UserResponse[]> {
+    const users = await this.userRepository.find({
+      where: { role },
+      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt'],
+    });
+    return users.map(user => this.toUserResponse(user));
+  }
+
+  // Trouver les utilisateurs actifs SANS password
+  async findActiveUsers(): Promise<UserResponse[]> {
+    const users = await this.userRepository.find({
+      where: { isActive: true },
+      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt'],
+    });
+    return users.map(user => this.toUserResponse(user));
+  }
+
+
 
   // Assigner un utilisateur à une organisation
   async assignToOrganization(userId: string, organizationName: string): Promise<UserResponse> {

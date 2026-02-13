@@ -1,6 +1,6 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, BeforeInsert, BeforeUpdate, JoinColumn, ManyToOne } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { Organization } from 'src/organization/entities/organization.entity';
+import { Organization } from '../../organization/entities/organization.entity';
 
 export enum UserRole {
   ADMIN = 'ADMIN',
