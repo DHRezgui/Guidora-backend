@@ -13,6 +13,7 @@ import {
 import { OrganizationService } from './organization.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import { OrganizationWithUsers } from './types/organization-with-users.type';
 
 @Controller('organization')
 export class OrganizationController {
@@ -56,17 +57,11 @@ export class OrganizationController {
   // Récupérer une organisation avec ses utilisateurs
   @Get(':id/users')
   @HttpCode(HttpStatus.OK)
-  async findByIdWithUsers(@Param('id', ParseUUIDPipe) id: string) {
+  async findByIdWithUsers(@Param('id', ParseUUIDPipe) id: string): Promise<{ success: boolean; organization: OrganizationWithUsers }> {
     const organization = await this.organizationService.findByIdWithUsers(id);
     return {
       success: true,
-      organization: {
-        id: organization.id,
-        name: organization.name,
-        plan: organization.plan,
-        userCount: organization.users?.length || 0,
-        users: organization.users || [],
-      },
+      organization,
     };
   }
 

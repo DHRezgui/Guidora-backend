@@ -5,6 +5,8 @@ import { Organization } from './entities/organization.entity';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationResponse } from './types/organization-response.type';
+import { User } from 'src/user/entities/user.entity';
+import { OrganizationWithUsers } from './types/organization-with-users.type';
 
 @Injectable()
 export class OrganizationService {
@@ -12,6 +14,16 @@ export class OrganizationService {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
   ) {}
+
+  private sanitizeUser(user: User): Partial<User> {
+    const { password, ...sanitizedUser } = user;
+    return sanitizedUser;
+  }
+
+  // Sanitiser plusieurs utilisateurs
+  private sanitizeUsers(users: User[]): Partial<User>[] {
+    return users.map(user => this.sanitizeUser(user));
+  }
 
   private toOrganizationResponse(org: Organization): OrganizationResponse {
     return {
@@ -74,7 +86,7 @@ export class OrganizationService {
   }
 
   // Récupérer une organisation avec ses utilisateurs
-  async findByIdWithUsers(id: string): Promise<Organization> {
+  async findByIdWithUsers(id: string): Promise<OrganizationWithUsers> {
     const organization = await this.organizationRepository.findOne({
       where: { id },
       relations: ['users'],
@@ -84,7 +96,23 @@ export class OrganizationService {
       throw new NotFoundException('Organisation introuvable');
     }
 
-    return organization;
+    const sanitizedUsers = this.sanitizeUsers(organization.users || []);
+
+    return {
+      id: organization.id,
+      name: organization.name,
+      apiKey: organization.apiKey,
+      plan: organization.plan,
+      domain: organization.domain,
+      settings: organization.settings,
+      maxTours: organization.maxTours,
+      maxUsers: organization.maxUsers,
+      isActive: organization.isActive,
+      createdAt: organization.createdAt,
+      updatedAt: organization.updatedAt,
+      userCount: sanitizedUsers.length,
+      users: sanitizedUsers,
+    };
   }
 
   // Mettre à jour une organisation
