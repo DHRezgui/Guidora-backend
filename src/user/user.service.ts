@@ -149,6 +149,7 @@ export class UserService {
     if (updateUserDto.lastName !== undefined) user.lastName = updateUserDto.lastName;
     if (updateUserDto.role) user.role = updateUserDto.role;
     if (updateUserDto.isActive !== undefined) user.isActive = updateUserDto.isActive;
+    if (updateUserDto.lastLoginAt !== undefined) user.lastLoginAt = updateUserDto.lastLoginAt;
 
     const updatedUser = await this.userRepository.save(user);
 

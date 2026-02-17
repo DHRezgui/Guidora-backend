@@ -1,5 +1,5 @@
-import { IsOptional, IsString, MinLength, MaxLength, IsEmail, IsEnum, IsBoolean } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsOptional, IsString, MinLength, MaxLength, IsEmail, IsEnum, IsBoolean, IsDate } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { UserRole } from '../entities/user.entity';
 
 export class UpdateUserDto {
@@ -27,6 +27,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsDate()
+  @Type(() => Date)
+  lastLoginAt?: Date;
 
   @IsOptional()
   @IsString()
