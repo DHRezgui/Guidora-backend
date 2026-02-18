@@ -29,6 +29,10 @@ export class AuthService {
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
 
+    if (!user.isActive) {
+      throw new UnauthorizedException('User account is inactive');
+    }
+
     const isPasswordValid = await user.validatePassword(loginUserDto.password);
 
     if (!isPasswordValid) {
@@ -36,7 +40,7 @@ export class AuthService {
     }
 
     user.lastLoginAt = new Date();
-    await this.userService.update(user.id, { isActive: true, lastLoginAt : user.lastLoginAt });
+    await this.userService.update(user.id, { lastLoginAt : user.lastLoginAt });
   
 
     const userResponse = await this.userService.findById(user.id);
