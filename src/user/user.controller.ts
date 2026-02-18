@@ -1,16 +1,20 @@
 import { 
-  Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, ParseUUIDPipe} from '@nestjs/common';
+  Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, ParseUUIDPipe, HttpException,} from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { UserRole } from './entities/user.entity';
+import { Public } from '../auth/decorators/public.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('user')  
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   // Inscription
+  @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() createUserDto: CreateUserDto) {
@@ -23,6 +27,7 @@ export class UserController {
   }
 
   // Connexion
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginUserDto: LoginUserDto) {
@@ -34,6 +39,7 @@ export class UserController {
     };
   }
 
+  @Roles(UserRole.ADMIN)
   @Get()
   @HttpCode(HttpStatus.OK)
   async findAll() {
@@ -59,6 +65,7 @@ export class UserController {
   }
 
   // Utilisateurs actifs
+  @Roles(UserRole.ADMIN)
   @Get('active')
   @HttpCode(HttpStatus.OK)
   async findActiveUsers() {
@@ -72,7 +79,18 @@ export class UserController {
 
   @Get(':id')
   @HttpCode(HttpStatus.OK)
-  async findById(@Param('id', new ParseUUIDPipe()) id: string) {
+  async findById(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    // Vérifier que l'utilisateur accède à son propre profil OU est ADMIN
+    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
+      throw new HttpException(
+        'Vous ne pouvez consulter que votre propre profil',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const user = await this.userService.findById(id);
     return {
       success: true,
@@ -85,8 +103,25 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   async update(
     @Param('id', new ParseUUIDPipe()) id: string, 
-    @Body() updateUserDto: UpdateUserDto
+    @Body() updateUserDto: UpdateUserDto,
+    @CurrentUser() currentUser: any,
   ) {
+    // Vérifier que l'utilisateur modifie son propre profil OU est ADMIN
+    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
+      throw new HttpException(
+        'Vous ne pouvez modifier que votre propre profil',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Empêcher un utilisateur non-ADMIN de changer son propre rôle
+    if (currentUser.role !== UserRole.ADMIN && updateUserDto.role) {
+      throw new HttpException(
+        'Vous ne pouvez pas modifier votre propre rôle',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const user = await this.userService.update(id, updateUserDto);
     return {
       success: true,
@@ -98,7 +133,18 @@ export class UserController {
   
   @Post(':id/logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Param('id', new ParseUUIDPipe()) id: string) {
+  async logout(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    // Vérifier que l'utilisateur se déconnecte lui-même OU est ADMIN
+    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
+      throw new HttpException(
+        'Vous ne pouvez déconnecter que vous-même',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const user = await this.userService.logout(id);
     return {
       success: true,
@@ -107,6 +153,7 @@ export class UserController {
     };
   }
 
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async delete(@Param('id', new ParseUUIDPipe()) id: string) {
@@ -118,6 +165,7 @@ export class UserController {
   }
 
   // Assigner à une organisation
+  @Roles(UserRole.ADMIN)
   @Post(':id/assign-organization')
   @HttpCode(HttpStatus.OK)
   async assignToOrganization(
@@ -133,6 +181,7 @@ export class UserController {
   }
 
   // Désassigner d'une organisation
+  @Roles(UserRole.ADMIN)
   @Post(':id/remove-organization')
   @HttpCode(HttpStatus.OK)
   async removeFromOrganization(@Param('id', ParseUUIDPipe) id: string) {

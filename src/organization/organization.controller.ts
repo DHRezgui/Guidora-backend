@@ -14,12 +14,15 @@ import { OrganizationService } from './organization.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationWithUsers } from './types/organization-with-users.type';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../user/entities/user.entity';
 
 @Controller('organization')
 export class OrganizationController {
   constructor(private readonly organizationService: OrganizationService) {}
 
   // Créer une organisation
+  @Roles(UserRole.ADMIN)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createOrganizationDto: CreateOrganizationDto) {
@@ -32,6 +35,7 @@ export class OrganizationController {
   }
 
   // Récupérer toutes les organisations
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get()
   @HttpCode(HttpStatus.OK)
   async findAll() {
@@ -44,6 +48,7 @@ export class OrganizationController {
   }
 
   // Récupérer une organisation par ID
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   async findById(@Param('id', ParseUUIDPipe) id: string) {
@@ -55,6 +60,7 @@ export class OrganizationController {
   }
 
   // Récupérer une organisation avec ses utilisateurs
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get(':id/users')
   @HttpCode(HttpStatus.OK)
   async findByIdWithUsers(@Param('id', ParseUUIDPipe) id: string): Promise<{ success: boolean; organization: OrganizationWithUsers }> {
@@ -66,6 +72,7 @@ export class OrganizationController {
   }
 
   // Compter les utilisateurs d'une organisation
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get(':id/users/count')
   @HttpCode(HttpStatus.OK)
   async countUsers(@Param('id', ParseUUIDPipe) id: string) {
@@ -77,6 +84,7 @@ export class OrganizationController {
   }
 
   // Mettre à jour une organisation
+  @Roles(UserRole.ADMIN)
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   async update(
@@ -92,6 +100,7 @@ export class OrganizationController {
   }
 
   // Supprimer une organisation
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async delete(@Param('id', ParseUUIDPipe) id: string) {
