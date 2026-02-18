@@ -152,10 +152,12 @@ export class OrganizationService {
     await this.organizationRepository.remove(organization);
   }
 
-  // Compter le nombre d'utilisateurs dans une organisation
+  // Compter le nombre d'utilisateurs ACTIFS dans une organisation
   async countUsers(id: string): Promise<number> {
     const organization = await this.findByIdWithUsers(id);
-    return organization.users ? organization.users.length : 0;
+    // Count only active users
+    const activeUsers = organization.users ? organization.users.filter(u => u.isActive) : [];
+    return activeUsers.length;
   }
 
   // Vérifier si une organisation a atteint sa limite d'utilisateurs

@@ -303,9 +303,9 @@ describe('OrganizationService', () => {
       const orgWithUsers = {
         ...mockOrganization,
         users: [
-          { id: 'user-1' },
-          { id: 'user-2' },
-          { id: 'user-3' },
+          { id: 'user-1', isActive: true },
+          { id: 'user-2', isActive: true },
+          { id: 'user-3', isActive: true },
         ],
       };
 
@@ -335,7 +335,7 @@ describe('OrganizationService', () => {
       const orgWithMaxUsers = {
         ...mockOrganization,
         maxUsers: 2,
-        users: [{ id: 'user-1' }, { id: 'user-2' }],
+        users: [{ id: 'user-1', isActive: true }, { id: 'user-2', isActive: true }],
       };
 
       mockOrganizationRepository.findOne
@@ -351,7 +351,7 @@ describe('OrganizationService', () => {
       const orgUnderLimit = {
         ...mockOrganization,
         maxUsers: 10,
-        users: [{ id: 'user-1' }],
+        users: [{ id: 'user-1', isActive: true }],
       };
 
       mockOrganizationRepository.findOne

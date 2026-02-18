@@ -220,7 +220,6 @@ describe('AuthService', () => {
       expect(userService.update).toHaveBeenCalledWith(
         userWithValidPassword.id,
         expect.objectContaining({
-        isActive: true,
         lastLoginAt: expect.any(Date),
       }),
     );

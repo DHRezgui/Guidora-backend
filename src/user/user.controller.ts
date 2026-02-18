@@ -11,7 +11,9 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('user')  
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+  ) {}
 
   // Inscription
   @Public()
@@ -83,10 +85,12 @@ export class UserController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser() currentUser: any,
   ) {
-    // Vérifier que l'utilisateur accède à son propre profil OU est ADMIN
-    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
+    // Allow ADMIN and DEVELOPER to view any user, or any user to view their own profile
+    if (currentUser.role !== UserRole.ADMIN && 
+        currentUser.role !== UserRole.DEVELOPER && 
+        currentUser.id !== id) {
       throw new HttpException(
-        'Vous ne pouvez consulter que votre propre profil',
+        'Forbidden',
         HttpStatus.FORBIDDEN,
       );
     }
