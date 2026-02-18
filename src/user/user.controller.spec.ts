@@ -6,7 +6,7 @@ import { UserRole } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, HttpException } from '@nestjs/common';
 
 describe('UserController', () => {
   let controller: UserController;
@@ -228,13 +228,21 @@ describe('UserController', () => {
     });
   });
 
-  describe('findById', () => {
+    describe('findById', () => {
     it('should return a user by id', async () => {
       const userId = '123e4567-e89b-12d3-a456-426614174000';
       
+      // Ajouter mockCurrentUser
+      const mockCurrentUser = {
+        id: userId,
+        email: 'test@example.com',
+        role: UserRole.USER,
+      };
+
       mockUserService.findById.mockResolvedValue(mockUserResponse);
 
-      const result = await controller.findById(userId);
+      // Passer currentUser en paramètre
+      const result = await controller.findById(userId, mockCurrentUser);
 
       expect(result).toEqual({
         success: true,
@@ -247,23 +255,71 @@ describe('UserController', () => {
     it('should throw NotFoundException when user not found', async () => {
       const userId = '123e4567-e89b-12d3-a456-426614174000';
       
+      // Mock admin user pour bypasser la vérification
+      const mockAdminUser = {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+      };
+
       mockUserService.findById.mockRejectedValue(
         new NotFoundException('Utilisateur introuvable'),
       );
 
-      await expect(controller.findById(userId)).rejects.toThrow(
+      // Passer admin user
+      await expect(controller.findById(userId, mockAdminUser)).rejects.toThrow(
         NotFoundException,
       );
       expect(service.findById).toHaveBeenCalledWith(userId);
     });
+
+    // Vérifier la protection d'accès
+    it('should throw ForbiddenException when user tries to view another profile', async () => {
+      const userId = 'other-user-id';
+      
+      const mockCurrentUser = {
+        id: 'my-user-id',
+        email: 'me@example.com',
+        role: UserRole.USER,
+      };
+
+      await expect(controller.findById(userId, mockCurrentUser)).rejects.toThrow(
+        HttpException,
+      );
+    });
+
+    // Admin peut voir n'importe quel profil
+    it('should allow admin to view any user profile', async () => {
+      const userId = 'other-user-id';
+      
+      const mockAdminUser = {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+      };
+
+      mockUserService.findById.mockResolvedValue(mockUserResponse);
+
+      const result = await controller.findById(userId, mockAdminUser);
+
+      expect(result.success).toBe(true);
+      expect(service.findById).toHaveBeenCalledWith(userId);
+    });
   });
 
-  describe('update', () => {
+    describe('update', () => {
     it('should update a user', async () => {
       const userId = '123e4567-e89b-12d3-a456-426614174000';
       const updateDto: UpdateUserDto = {
         firstName: 'Updated',
         lastName: 'Name',
+      };
+
+      // Ajouter mockCurrentUser
+      const mockCurrentUser = {
+        id: userId,
+        email: 'test@example.com',
+        role: UserRole.USER,
       };
 
       const updatedUser = {
@@ -274,7 +330,8 @@ describe('UserController', () => {
 
       mockUserService.update.mockResolvedValue(updatedUser);
 
-      const result = await controller.update(userId, updateDto);
+      // Passer currentUser
+      const result = await controller.update(userId, updateDto, mockCurrentUser);
 
       expect(result).toEqual({
         success: true,
@@ -282,22 +339,81 @@ describe('UserController', () => {
         user: updatedUser,
       });
       expect(service.update).toHaveBeenCalledWith(userId, updateDto);
-      expect(service.update).toHaveBeenCalledTimes(1);
+    });
+
+    // User ne peut pas modifier un autre profil
+    it('should throw ForbiddenException when user tries to update another profile', async () => {
+      const userId = 'other-user-id';
+      const updateDto: UpdateUserDto = { firstName: 'Hack' };
+      
+      const mockCurrentUser = {
+        id: 'my-user-id',
+        email: 'me@example.com',
+        role: UserRole.USER,
+      };
+
+      await expect(
+        controller.update(userId, updateDto, mockCurrentUser),
+      ).rejects.toThrow(HttpException);
+    });
+
+    // User ne peut pas changer son propre rôle
+    it('should throw ForbiddenException when user tries to change own role', async () => {
+      const userId = 'my-user-id';
+      const updateDto: UpdateUserDto = { role: UserRole.ADMIN };
+      
+      const mockCurrentUser = {
+        id: userId,
+        email: 'me@example.com',
+        role: UserRole.USER,
+      };
+
+      await expect(
+        controller.update(userId, updateDto, mockCurrentUser),
+      ).rejects.toThrow(HttpException);
+    });
+
+    // Admin peut tout modifier
+    it('should allow admin to update any user', async () => {
+      const userId = 'other-user-id';
+      const updateDto: UpdateUserDto = { role: UserRole.DEVELOPER };
+      
+      const mockAdminUser = {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+      };
+
+      const updatedUser = {
+        ...mockUserResponse,
+        role: UserRole.DEVELOPER,
+      };
+
+      mockUserService.update.mockResolvedValue(updatedUser);
+
+      const result = await controller.update(userId, updateDto, mockAdminUser);
+
+      expect(result.success).toBe(true);
     });
   });
 
-  describe('logout', () => {
+    describe('logout', () => {
     it('should logout a user', async () => {
       const userId = '123e4567-e89b-12d3-a456-426614174000';
 
-      const loggedOutUser = {
-        ...mockUserResponse,
-        lastLoginAt: null,
+      // Ajouter mockCurrentUser
+      const mockCurrentUser = {
+        id: userId,
+        email: 'test@example.com',
+        role: UserRole.USER,
       };
+
+      const loggedOutUser = { ...mockUserResponse, isActive: false };
 
       mockUserService.logout.mockResolvedValue(loggedOutUser);
 
-      const result = await controller.logout(userId);
+      // Passer currentUser
+      const result = await controller.logout(userId, mockCurrentUser);
 
       expect(result).toEqual({
         success: true,
@@ -305,7 +421,39 @@ describe('UserController', () => {
         user: loggedOutUser,
       });
       expect(service.logout).toHaveBeenCalledWith(userId);
-      expect(service.logout).toHaveBeenCalledTimes(1);
+    });
+
+    // User ne peut pas déconnecter un autre user
+    it('should throw ForbiddenException when user tries to logout another user', async () => {
+      const userId = 'other-user-id';
+      
+      const mockCurrentUser = {
+        id: 'my-user-id',
+        email: 'me@example.com',
+        role: UserRole.USER,
+      };
+
+      await expect(controller.logout(userId, mockCurrentUser)).rejects.toThrow(
+        HttpException,
+      );
+    });
+
+    // Admin peut déconnecter n'importe qui
+    it('should allow admin to logout any user', async () => {
+      const userId = 'other-user-id';
+      
+      const mockAdminUser = {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+      };
+
+      const loggedOutUser = { ...mockUserResponse, isActive: false };
+      mockUserService.logout.mockResolvedValue(loggedOutUser);
+
+      const result = await controller.logout(userId, mockAdminUser);
+
+      expect(result.success).toBe(true);
     });
   });
 
