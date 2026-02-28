@@ -8,7 +8,7 @@ import { UserRole } from './entities/user.entity';
 import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { ApiAuth } from 'src/swagger/security-schemas';
 
 @Controller('user')  
@@ -494,7 +494,21 @@ export class UserController {
     summary: 'Assigner un utilisateur à une organisation',
     description: 'Assigne un utilisateur à une organisation spécifique (seulement pour les ADMIN)'
   })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
+  @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+  @ApiBody({
+    description: 'Nom de l\'organisation à laquelle assigner l\'utilisateur',
+    schema: {
+      type: 'object',
+      required: ['organizationName'],
+      properties: {
+        organizationName: {
+          type: 'string',
+          example: 'Acme Corporation',
+          description: 'Le nom exact de l\'organisation',
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 200, description: 'Utilisateur assigné à l\'organisation', schema: {
     example: {
       success: true,
