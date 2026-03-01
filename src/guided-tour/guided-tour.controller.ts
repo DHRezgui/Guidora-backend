@@ -11,7 +11,7 @@ import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { GuidedTour } from './entities/guided-tour.entity';
 import { ApiAuth } from '../swagger/security-schemas';
 
-@ApiTags('Parcours Guidés')
+@ApiTags('Guided Tour')
 @Controller('tours')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiAuth()

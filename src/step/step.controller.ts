@@ -30,7 +30,7 @@ import { UpdateStepDto } from './dto/update-step.dto';
 import { Step } from './entities/step.entity';
 import { ApiAuth } from '../swagger/security-schemas';
 
-@ApiTags('Étapes de Parcours')
+@ApiTags('Steps of Guided Tour')
 @Controller('steps')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiAuth()

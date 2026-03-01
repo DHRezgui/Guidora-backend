@@ -10,6 +10,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { GuidedTourModule } from './guided-tour/guided-tour.module';
 import { StepModule } from './step/step.module';
+import { TrackingModule } from './tracking/tracking.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -17,6 +19,14 @@ import { StepModule } from './step/step.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+
+    RedisModule.forRoot({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      password: process.env.REDIS_PASSWORD || undefined,
+      db: 0,
+    }),
+
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST || 'localhost',
@@ -34,6 +44,7 @@ import { StepModule } from './step/step.module';
     AuthModule,
     GuidedTourModule,
     StepModule,
+    TrackingModule,
   ],
   controllers: [AppController],  
   providers: [
