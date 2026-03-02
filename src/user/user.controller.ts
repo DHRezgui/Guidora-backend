@@ -9,7 +9,7 @@ import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
-import { ApiAuth } from 'src/swagger/security-schemas';
+import { ApiAuth } from '../swagger/security-schemas';
 
 @Controller('user')  
 export class UserController {

@@ -17,7 +17,7 @@ import { OrganizationWithUsers } from './types/organization-with-users.type';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
-import { ApiAuth } from 'src/swagger/security-schemas';
+import { ApiAuth } from '../swagger/security-schemas';
 import { error } from 'console';
 
 @Controller('organization')

@@ -12,6 +12,7 @@ import { GuidedTourModule } from './guided-tour/guided-tour.module';
 import { StepModule } from './step/step.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
+import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { RedisModule } from './redis/redis.module';
     GuidedTourModule,
     StepModule,
     TrackingModule,
+    RabbitmqModule,
   ],
   controllers: [AppController],  
   providers: [

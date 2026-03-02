@@ -16,7 +16,7 @@ import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { ApiAuth } from 'src/swagger/security-schemas';
+import { ApiAuth } from '../swagger/security-schemas';
 
 @Controller('auth')
 export class AuthController {

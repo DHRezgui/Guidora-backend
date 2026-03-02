@@ -1,41 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TrackingController } from './tracking.controller';
-import { TrackingService } from './tracking.service';
+import { AsyncTrackingService } from './async-tracking.service';
 import { TrackEventDto } from './dto/track-event.dto';
 import { BatchTrackEventsDto } from './dto/batch-track-events.dto';
 import { EventType } from './enums/tracking.enums';
-import { BehaviorEvent } from './entities/behavior_event.entity';
 
 describe('TrackingController', () => {
   let controller: TrackingController;
-  let service: TrackingService;
+  let asyncService: AsyncTrackingService;
 
-  const mockTrackingService = {
-    trackEvent: jest.fn(),
-    trackBatch: jest.fn(),
-    findEventsBySession: jest.fn(),
-    analyzeSessionFrictions: jest.fn(),
-    findEventsByOrganization: jest.fn(),
+  const mockAsyncTrackingService = {
+    trackEventAsync: jest.fn(),
+    trackBatchAsync: jest.fn(),
   };
 
   // ── helpers ──────────────────────────────────────────────────
-  const makeMockEvent = (overrides: Partial<BehaviorEvent> = {}): BehaviorEvent =>
-    ({
-      id: 'evt-uuid-1',
-      userId: 'usr-uuid-1',
-      sessionId: 'sess-uuid-1',
-      organizationId: 'org-uuid-1',
-      eventType: EventType.CLICK,
-      pageUrl: '/dashboard/transfers',
-      elementSelector: '#transfer-button',
-      elementText: 'Virement',
-      scrollDepth: null,
-      timeOnPage: 30,
-      metadata: {},
-      timestamp: new Date('2026-02-15T10:30:00.000Z'),
-      ...overrides,
-    }) as BehaviorEvent;
-
   const makeTrackEventDto = (overrides: Partial<TrackEventDto> = {}): TrackEventDto => ({
     sessionId: 'sess-uuid-1',
     organizationId: 'org-uuid-1',
@@ -53,14 +32,14 @@ describe('TrackingController', () => {
       controllers: [TrackingController],
       providers: [
         {
-          provide: TrackingService,
-          useValue: mockTrackingService,
+          provide: AsyncTrackingService,
+          useValue: mockAsyncTrackingService,
         },
       ],
     }).compile();
 
     controller = module.get<TrackingController>(TrackingController);
-    service = module.get<TrackingService>(TrackingService);
+    asyncService = module.get<AsyncTrackingService>(AsyncTrackingService);
     jest.clearAllMocks();
   });
 
@@ -69,40 +48,61 @@ describe('TrackingController', () => {
   });
 
   // ════════════════════════════════════════════════════════════
-  // POST /tracking/events
+  // POST /tracking/events  (asynchrone – 202 Accepted)
   // ════════════════════════════════════════════════════════════
   describe('trackEvent', () => {
     const dto = makeTrackEventDto();
-    const savedEvent = makeMockEvent();
 
-    it('devrait enregistrer un événement et retourner un résumé', async () => {
-      mockTrackingService.trackEvent.mockResolvedValue(savedEvent);
+    it('devrait accepter un événement et retourner accepted: true', async () => {
+      mockAsyncTrackingService.trackEventAsync.mockResolvedValue({ accepted: true });
 
       const result = await controller.trackEvent(dto);
 
-      expect(service.trackEvent).toHaveBeenCalledWith(dto);
+      expect(asyncService.trackEventAsync).toHaveBeenCalledWith(dto);
+      expect(asyncService.trackEventAsync).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         success: true,
-        message: 'Événement enregistré',
-        event: {
-          id: savedEvent.id,
-          sessionId: savedEvent.sessionId,
-          eventType: savedEvent.eventType,
-          pageUrl: savedEvent.pageUrl,
-          timestamp: savedEvent.timestamp,
-        },
+        message: 'Événement accepté',
+        accepted: true,
+      });
+    });
+
+    it('devrait retourner accepted: false si le buffer est plein', async () => {
+      mockAsyncTrackingService.trackEventAsync.mockResolvedValue({ accepted: false });
+
+      const result = await controller.trackEvent(dto);
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Événement rejeté (buffer plein)',
+        accepted: false,
       });
     });
 
     it('devrait propager une erreur du service', async () => {
-      mockTrackingService.trackEvent.mockRejectedValue(new Error('DB error'));
+      mockAsyncTrackingService.trackEventAsync.mockRejectedValue(
+        new Error('RabbitMQ connection failed'),
+      );
 
-      await expect(controller.trackEvent(dto)).rejects.toThrow('DB error');
+      await expect(controller.trackEvent(dto)).rejects.toThrow('RabbitMQ connection failed');
+    });
+
+    it('devrait transmettre le DTO complet au service', async () => {
+      const fullDto = makeTrackEventDto({
+        userId: 'usr-uuid-1',
+        scrollDepth: 75,
+        metadata: { viewportWidth: 1920 },
+      });
+      mockAsyncTrackingService.trackEventAsync.mockResolvedValue({ accepted: true });
+
+      await controller.trackEvent(fullDto);
+
+      expect(asyncService.trackEventAsync).toHaveBeenCalledWith(fullDto);
     });
   });
 
   // ════════════════════════════════════════════════════════════
-  // POST /tracking/events/batch
+  // POST /tracking/events/batch  (asynchrone – 202 Accepted)
   // ════════════════════════════════════════════════════════════
   describe('trackBatch', () => {
     const dto1 = makeTrackEventDto();
@@ -112,193 +112,78 @@ describe('TrackingController', () => {
     });
     const batchDto: BatchTrackEventsDto = { events: [dto1, dto2] };
 
-    const savedEvents = [
-      makeMockEvent({ id: 'evt-uuid-1' }),
-      makeMockEvent({ id: 'evt-uuid-2', eventType: EventType.PAGE_VIEW, pageUrl: '/dashboard' }),
-    ];
-
-    it('devrait enregistrer un batch et retourner le résumé', async () => {
-      mockTrackingService.trackBatch.mockResolvedValue(savedEvents);
+    it('devrait accepter un batch et retourner le résumé', async () => {
+      mockAsyncTrackingService.trackBatchAsync.mockResolvedValue({
+        accepted: true,
+        count: 2,
+      });
 
       const result = await controller.trackBatch(batchDto);
 
-      expect(service.trackBatch).toHaveBeenCalledWith(batchDto.events);
+      expect(asyncService.trackBatchAsync).toHaveBeenCalledWith(batchDto.events);
+      expect(asyncService.trackBatchAsync).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         success: true,
-        message: 'Batch enregistré',
+        message: 'Batch accepté (2/2 événements)',
+        accepted: true,
         count: 2,
-        events: [
-          { id: 'evt-uuid-1', eventType: EventType.CLICK, pageUrl: '/dashboard/transfers' },
-          { id: 'evt-uuid-2', eventType: EventType.PAGE_VIEW, pageUrl: '/dashboard' },
-        ],
       });
     });
 
-    it('devrait retourner un batch vide si aucun événement', async () => {
-      mockTrackingService.trackBatch.mockResolvedValue([]);
+    it('devrait retourner accepted: false si le buffer est plein', async () => {
+      mockAsyncTrackingService.trackBatchAsync.mockResolvedValue({
+        accepted: false,
+        count: 0,
+      });
 
-      const result = await controller.trackBatch({ events: [] });
+      const result = await controller.trackBatch(batchDto);
 
+      expect(result).toEqual({
+        success: false,
+        message: 'Batch rejeté (buffer plein)',
+        accepted: false,
+        count: 0,
+      });
+    });
+
+    it('devrait indiquer un succès partiel quand certains événements échouent', async () => {
+      const largeBatch: BatchTrackEventsDto = {
+        events: [dto1, dto2, makeTrackEventDto({ pageUrl: '/settings' })],
+      };
+      mockAsyncTrackingService.trackBatchAsync.mockResolvedValue({
+        accepted: true,
+        count: 2,
+      });
+
+      const result = await controller.trackBatch(largeBatch);
+
+      expect(result).toEqual({
+        success: true,
+        message: 'Batch accepté (2/3 événements)',
+        accepted: true,
+        count: 2,
+      });
+    });
+
+    it('devrait gérer un batch vide', async () => {
+      const emptyBatch: BatchTrackEventsDto = { events: [] };
+      mockAsyncTrackingService.trackBatchAsync.mockResolvedValue({
+        accepted: false,
+        count: 0,
+      });
+
+      const result = await controller.trackBatch(emptyBatch);
+
+      expect(result.accepted).toBe(false);
       expect(result.count).toBe(0);
-      expect(result.events).toEqual([]);
     });
 
     it('devrait propager une erreur du service', async () => {
-      mockTrackingService.trackBatch.mockRejectedValue(new Error('Org not found'));
-
-      await expect(controller.trackBatch(batchDto)).rejects.toThrow('Org not found');
-    });
-  });
-
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/sessions/:sessionId/events
-  // ════════════════════════════════════════════════════════════
-  describe('getSessionEvents', () => {
-    const sessionId = 'sess-uuid-1';
-    const events = [
-      makeMockEvent({ id: 'evt-1' }),
-      makeMockEvent({ id: 'evt-2', eventType: EventType.SCROLL }),
-    ];
-
-    it('devrait retourner les événements d\'une session', async () => {
-      mockTrackingService.findEventsBySession.mockResolvedValue(events);
-
-      const result = await controller.getSessionEvents(sessionId, 100);
-
-      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 100);
-      expect(result).toEqual({
-        success: true,
-        count: 2,
-        events,
-      });
-    });
-
-    it('devrait retourner un tableau vide si aucun événement', async () => {
-      mockTrackingService.findEventsBySession.mockResolvedValue([]);
-
-      const result = await controller.getSessionEvents(sessionId, 100);
-
-      expect(result.count).toBe(0);
-      expect(result.events).toEqual([]);
-    });
-
-    it('devrait transmettre la limite personnalisée', async () => {
-      mockTrackingService.findEventsBySession.mockResolvedValue([events[0]]);
-
-      await controller.getSessionEvents(sessionId, 1);
-
-      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 1);
-    });
-  });
-
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/sessions/:sessionId/frictions
-  // ════════════════════════════════════════════════════════════
-  describe('analyzeSessionFrictions', () => {
-    const sessionId = 'sess-uuid-1';
-
-    it('devrait analyser les frictions et retourner un niveau de risque NONE', async () => {
-      const frictions = {
-        clickMisses: 0,
-        scrollHesitations: 0,
-        excessiveTimeOnPage: 0,
-        formAbandonments: 0,
-        navigationBacks: 0,
-      };
-      mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
-
-      const result = await controller.analyzeSessionFrictions(sessionId);
-
-      expect(service.analyzeSessionFrictions).toHaveBeenCalledWith(sessionId);
-      expect(result).toEqual({
-        success: true,
-        sessionId,
-        frictions,
-        riskLevel: 'NONE',
-      });
-    });
-
-    it('devrait retourner LOW pour 2-4 frictions', async () => {
-      const frictions = { clickMisses: 2, scrollHesitations: 0, excessiveTimeOnPage: 0, formAbandonments: 0, navigationBacks: 0 };
-      mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
-
-      const result = await controller.analyzeSessionFrictions(sessionId);
-      expect(result.riskLevel).toBe('LOW');
-    });
-
-    it('devrait retourner MEDIUM pour 5-9 frictions', async () => {
-      const frictions = { clickMisses: 3, scrollHesitations: 2, excessiveTimeOnPage: 0, formAbandonments: 0, navigationBacks: 0 };
-      mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
-
-      const result = await controller.analyzeSessionFrictions(sessionId);
-      expect(result.riskLevel).toBe('MEDIUM');
-    });
-
-    it('devrait retourner HIGH pour 10+ frictions', async () => {
-      const frictions = { clickMisses: 5, scrollHesitations: 3, excessiveTimeOnPage: 2, formAbandonments: 0, navigationBacks: 0 };
-      mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
-
-      const result = await controller.analyzeSessionFrictions(sessionId);
-      expect(result.riskLevel).toBe('HIGH');
-    });
-  });
-
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/organizations/:organizationId/events
-  // ════════════════════════════════════════════════════════════
-  describe('getOrganizationEvents', () => {
-    const orgId = 'org-uuid-1';
-    const events = [makeMockEvent(), makeMockEvent({ id: 'evt-uuid-2' })];
-
-    it('devrait retourner les événements d\'une organisation sans filtres', async () => {
-      mockTrackingService.findEventsByOrganization.mockResolvedValue(events);
-
-      const result = await controller.getOrganizationEvents(orgId);
-
-      expect(service.findEventsByOrganization).toHaveBeenCalledWith(orgId, {
-        eventType: undefined,
-        startDate: undefined,
-        endDate: undefined,
-        pageUrl: undefined,
-        limit: undefined,
-      });
-      expect(result).toEqual({
-        success: true,
-        count: 2,
-        events,
-      });
-    });
-
-    it('devrait transmettre les filtres au service', async () => {
-      mockTrackingService.findEventsByOrganization.mockResolvedValue([events[0]]);
-      const startDate = '2026-02-15T00:00:00Z';
-      const endDate = '2026-02-15T23:59:59Z';
-
-      await controller.getOrganizationEvents(
-        orgId,
-        EventType.CLICK,
-        startDate,
-        endDate,
-        '/dashboard',
-        50,
+      mockAsyncTrackingService.trackBatchAsync.mockRejectedValue(
+        new Error('RabbitMQ unavailable'),
       );
 
-      expect(service.findEventsByOrganization).toHaveBeenCalledWith(orgId, {
-        eventType: EventType.CLICK,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        pageUrl: '/dashboard',
-        limit: 50,
-      });
-    });
-
-    it('devrait retourner un tableau vide si aucun événement', async () => {
-      mockTrackingService.findEventsByOrganization.mockResolvedValue([]);
-
-      const result = await controller.getOrganizationEvents(orgId);
-
-      expect(result.count).toBe(0);
-      expect(result.events).toEqual([]);
+      await expect(controller.trackBatch(batchDto)).rejects.toThrow('RabbitMQ unavailable');
     });
   });
 });
