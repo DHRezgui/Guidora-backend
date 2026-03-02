@@ -73,4 +73,8 @@ export class AuthService {
     const user = await this.userService.findById(userId);
     return this.generateToken(user);
   }
+
+  async logout(userId: string) {
+    return this.userService.logout(userId);
+  }
 }

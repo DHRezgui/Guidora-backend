@@ -3,9 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { UserRole } from './entities/user.entity';
-import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { LoginUserDto } from './dto/login-user.dto';
 import { NotFoundException, HttpException } from '@nestjs/common';
 
 describe('UserController', () => {
@@ -61,55 +59,6 @@ describe('UserController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
-  });
-
-  describe('register', () => {
-    it('should create a new user', async () => {
-      const createUserDto: CreateUserDto = {
-        email: 'newuser@example.com',
-        password: 'Password123!',
-        firstName: 'Jane',
-        lastName: 'Smith',
-      };
-
-      mockUserService.create.mockResolvedValue(mockUserResponse);
-
-      const result = await controller.register(createUserDto);
-
-      expect(result).toEqual({
-        success: true,
-        message: 'Utilisateur créé avec succès',
-        user: mockUserResponse,
-      });
-      expect(service.create).toHaveBeenCalledWith(createUserDto);
-      expect(service.create).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('login', () => {
-    it('should login a user successfully', async () => {
-      const loginDto: LoginUserDto = {
-        email: 'test@example.com',
-        password: 'Password123!',
-      };
-
-      const loggedInUser = {
-        ...mockUserResponse,
-        lastLoginAt: new Date(),
-      };
-
-      mockUserService.login.mockResolvedValue(loggedInUser);
-
-      const result = await controller.login(loginDto);
-
-      expect(result).toEqual({
-        success: true,
-        message: 'Connexion réussie',
-        user: loggedInUser,
-      });
-      expect(service.login).toHaveBeenCalledWith(loginDto);
-      expect(service.login).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('findAll', () => {
@@ -397,65 +346,6 @@ describe('UserController', () => {
     });
   });
 
-    describe('logout', () => {
-    it('should logout a user', async () => {
-      const userId = '123e4567-e89b-12d3-a456-426614174000';
-
-      // Ajouter mockCurrentUser
-      const mockCurrentUser = {
-        id: userId,
-        email: 'test@example.com',
-        role: UserRole.USER,
-      };
-
-      const loggedOutUser = { ...mockUserResponse, isActive: false };
-
-      mockUserService.logout.mockResolvedValue(loggedOutUser);
-
-      // Passer currentUser
-      const result = await controller.logout(userId, mockCurrentUser);
-
-      expect(result).toEqual({
-        success: true,
-        message: 'Déconnexion réussie',
-        user: loggedOutUser,
-      });
-      expect(service.logout).toHaveBeenCalledWith(userId);
-    });
-
-    // User ne peut pas déconnecter un autre user
-    it('should throw ForbiddenException when user tries to logout another user', async () => {
-      const userId = 'other-user-id';
-      
-      const mockCurrentUser = {
-        id: 'my-user-id',
-        email: 'me@example.com',
-        role: UserRole.USER,
-      };
-
-      await expect(controller.logout(userId, mockCurrentUser)).rejects.toThrow(
-        HttpException,
-      );
-    });
-
-    // Admin peut déconnecter n'importe qui
-    it('should allow admin to logout any user', async () => {
-      const userId = 'other-user-id';
-      
-      const mockAdminUser = {
-        id: 'admin-id',
-        email: 'admin@example.com',
-        role: UserRole.ADMIN,
-      };
-
-      const loggedOutUser = { ...mockUserResponse, isActive: false };
-      mockUserService.logout.mockResolvedValue(loggedOutUser);
-
-      const result = await controller.logout(userId, mockAdminUser);
-
-      expect(result.success).toBe(true);
-    });
-  });
 
   describe('delete', () => {
     it('should delete a user', async () => {

@@ -15,6 +15,7 @@ describe('AuthController', () => {
     register: jest.fn(),
     login: jest.fn(),
     refreshToken: jest.fn(),
+    logout: jest.fn(),
   };
 
   const mockJwtResponse = {
@@ -253,6 +254,37 @@ describe('AuthController', () => {
 
       await expect(controller.refresh(mockCurrentUser)).rejects.toThrow(
         UnauthorizedException,
+      );
+    });
+  });
+
+  
+  describe('logout', () => {
+    it('should logout the current user', async () => {
+      const loggedOutUser = {
+        ...mockJwtResponse.user,
+        isActive: false,
+      };
+
+      mockAuthService.logout.mockResolvedValue(loggedOutUser);
+
+      const result = await controller.logout(mockCurrentUser);
+
+      expect(result).toEqual({
+        success: true,
+        message: 'Déconnexion réussie',
+        user: loggedOutUser,
+      });
+      expect(service.logout).toHaveBeenCalledWith(mockCurrentUser.id);
+    });
+
+    it('should throw error if user not found', async () => {
+      mockAuthService.logout.mockRejectedValue(
+        new Error('Utilisateur introuvable'),
+      );
+
+      await expect(controller.logout(mockCurrentUser)).rejects.toThrow(
+        'Utilisateur introuvable',
       );
     });
   });

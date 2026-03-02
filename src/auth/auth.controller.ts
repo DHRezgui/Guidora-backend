@@ -6,7 +6,11 @@ import {
   HttpStatus,
   Get,
   UseGuards,
+  Param,
+  ParseUUIDPipe,
+  HttpException,
 } from '@nestjs/common';
+import { UserRole } from '../user/entities/user.entity';
 import { AuthService } from './auth.service';
 
 import { LoginUserDto } from '../user/dto/login-user.dto';
@@ -166,6 +170,43 @@ export class AuthController {
       success: true,
       message: 'Token renouvelé',
       ...result,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiAuth()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Déconnexion',
+    description: 'Déconnecte l\'utilisateur connecté'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Déconnexion réussie',
+    schema: {
+      example: {
+        success: true,
+        message: 'Déconnexion réussie',
+        user: {
+          id: 'uuid-here',
+          email: 'dhia@trustdev.com',
+          firstName: 'Dhia',
+          lastName: 'Rezgui',
+          role: 'USER',
+          organizationId: 'org-uuid',
+          isActive: false,
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Utilisateur introuvable' })
+  async logout(@CurrentUser() currentUser: any) {
+    const user = await this.authService.logout(currentUser.id);
+    return {
+      success: true,
+      message: 'Déconnexion réussie',
+      user,
     };
   }
 }

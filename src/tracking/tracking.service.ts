@@ -17,7 +17,7 @@ export class TrackingService {
     private organizationService: OrganizationService,
   ) {}
 
-  // ✅ Enregistrer un événement unique
+  // Enregistrer un événement unique
   async trackEvent(trackEventDto: TrackEventDto): Promise<BehaviorEvent> {
     // Valider l'organisation
     await this.organizationService.findById(trackEventDto.organizationId);
@@ -37,7 +37,7 @@ export class TrackingService {
     return savedEvent;
   }
 
-  // ✅ Enregistrer un batch d'événements
+  // Enregistrer un batch d'événements
   async trackBatch(eventsDto: TrackEventDto[]): Promise<BehaviorEvent[]> {
     // Valider toutes les organisations
     const organizationIds = [...new Set(eventsDto.map(e => e.organizationId))];
@@ -64,7 +64,7 @@ export class TrackingService {
     return savedEvents;
   }
 
-  // ✅ Mettre à jour le cache Redis pour une session
+  // Mettre à jour le cache Redis pour une session
   private async updateSessionCache(sessionId: string, eventData: TrackEventDto): Promise<void> {
     const cacheKey = `session:${sessionId}`;
     const sessionData = await this.redis.get(cacheKey);
@@ -94,14 +94,14 @@ export class TrackingService {
     await this.redis.setex(cacheKey, 86400, JSON.stringify(session));
   }
 
-  // ✅ Récupérer les données d'une session
+  // Récupérer les données d'une session
   async getSessionData(sessionId: string): Promise<any> {
     const cacheKey = `session:${sessionId}`;
     const sessionData = await this.redis.get(cacheKey);
     return sessionData ? JSON.parse(sessionData) : null;
   }
 
-  // ✅ Trouver les événements par utilisateur
+  // Trouver les événements par utilisateur
   async findEventsByUser(userId: string, limit: number = 100): Promise<BehaviorEvent[]> {
     return this.eventRepository.find({
       where: { userId },
@@ -110,7 +110,7 @@ export class TrackingService {
     });
   }
 
-  // ✅ Trouver les événements par session
+  // Trouver les événements par session
   async findEventsBySession(sessionId: string, limit: number = 100): Promise<BehaviorEvent[]> {
     return this.eventRepository.find({
       where: { sessionId },
@@ -119,7 +119,7 @@ export class TrackingService {
     });
   }
 
-  // ✅ Trouver les événements par organisation avec filtres
+  // Trouver les événements par organisation avec filtres
   async findEventsByOrganization(
     organizationId: string,
     filters: {
@@ -158,7 +158,7 @@ export class TrackingService {
     return query.getMany();
   }
 
-  // ✅ Analyser les frictions dans une session
+  // Analyser les frictions dans une session
   async analyzeSessionFrictions(sessionId: string): Promise<any> {
     const events = await this.findEventsBySession(sessionId, 1000);
     

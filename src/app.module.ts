@@ -13,6 +13,7 @@ import { StepModule } from './step/step.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
 import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
+import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
     StepModule,
     TrackingModule,
     RabbitmqModule,
+    BehaviorAnalysisModule,
   ],
   controllers: [AppController],  
   providers: [

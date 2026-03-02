@@ -1,11 +1,8 @@
 import { 
   Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, ParseUUIDPipe, HttpException,} from '@nestjs/common';
 import { UserService } from './user.service';
-import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { LoginUserDto } from './dto/login-user.dto';
 import { UserRole } from './entities/user.entity';
-import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
@@ -17,84 +14,6 @@ export class UserController {
     private readonly userService: UserService,
   ) {}
 
-  // Inscription
-  @Public()
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ 
-    summary: 'Inscription d\'un nouvel utilisateur',
-    description: 'Crée un compte utilisateur. Rôle par défaut: USER',
-  })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Utilisateur créé avec succès',
-    schema: {
-      example: {
-        success: true,
-        message: 'Utilisateur créé avec succès',
-        user: {
-          id: 'uuid-here',
-          email: 'john.doe@example.com',
-          firstName: 'John',
-          lastName: 'Doe',
-          role: 'USER',
-          isActive: true,
-          createdAt: '2026-02-15T10:30:00.000Z',
-          updatedAt: '2026-02-15T10:30:00.000Z'
-        }
-      }
-    }
-  })
-  @ApiResponse({ status: 409, description: 'Cet email est déjà utilisé' })
-  async register(@Body() createUserDto: CreateUserDto) {
-    const user = await this.userService.create(createUserDto);
-    return {
-      success: true,
-      message: 'Utilisateur créé avec succès',
-      user,
-    };
-  }
-
-  // Connexion
-  @Public()
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
-    summary: 'Connexion utilisateur',
-    description: 'Authentifie un utilisateur et retourne un token JWT valide 1h'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Connexion réussie',
-    schema: {
-      example: {
-        success: true,
-        message: 'Connexion réussie',
-        user: {
-          id: 'uuid-here',
-          email: 'john.doe@example.com',
-          firstName: 'John',
-          lastName: 'Doe',
-          role: 'USER',
-          "organizationId": null,
-          "isActive": true,
-          "emailVerified": false,
-          "lastLoginAt": "2026-02-20T09:59:53.672Z",
-          "createdAt": "2026-02-20T09:34:29.480Z",
-          "updatedAt": "2026-02-20T09:59:53.720Z"
-        },
-      }
-    }
-  })
-  @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
-  async login(@Body() loginUserDto: LoginUserDto) {
-    const user = await this.userService.login(loginUserDto);
-    return {
-      success: true,
-      message: 'Connexion réussie',
-      user,
-    };
-  }
 
   @Roles(UserRole.ADMIN)
   @Get()
@@ -392,63 +311,7 @@ export class UserController {
     };
   }
 
-  
-  @ApiAuth()
-  @Post(':id/logout')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
-    summary: 'Déconnexion d\'un utilisateur',
-    description: 'Déconnecte un utilisateur en invalidant son token JWT'  
-  })
-  @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Déconnexion réussie', schema: {
-    example: {
-      success: true,
-      message: 'Déconnexion réussie',
-      user: {
-        id: 'uuid-here',
-        email: 'john.doe@example.com',
-        firstName: 'John',
-        lastName: 'Doe',
-        role: 'USER',
-        organizationId: 'org-uuid',
-        isActive: true,
-        emailVerified: false,
-        lastLoginAt: null,
-        createdAt: '2026-02-15T10:30:00.000Z',
-        updatedAt: '2026-02-15T12:00:00.000Z',
-      }
-    }
-  }})
-  @ApiResponse({ status: 403, description: 'Tentative de déconnexion non autorisée', example: {
-    message: 'Forbidden resource',
-    error: 'Forbidden',
-    statusCode: 403
-  }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
-    error: 'Not Found',
-    statusCode: 404,
-  }})
-  async logout(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() currentUser: any,
-  ) {
-    // Vérifier que l'utilisateur se déconnecte lui-même OU est ADMIN
-    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
-      throw new HttpException(
-        'Vous ne pouvez déconnecter que vous-même',
-        HttpStatus.FORBIDDEN,
-      );
-    }
 
-    const user = await this.userService.logout(id);
-    return {
-      success: true,
-      message: 'Déconnexion réussie',
-      user,
-    };
-  }
 
   
   @ApiAuth()

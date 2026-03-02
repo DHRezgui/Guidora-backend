@@ -18,6 +18,7 @@ describe('AuthService', () => {
     findByEmail: jest.fn(),
     findById: jest.fn(),
     update: jest.fn(),
+    logout: jest.fn(),
   };
 
   const mockJwtService = {
@@ -315,6 +316,27 @@ describe('AuthService', () => {
         role: mockUserResponse.role,
         organizationId: mockUserResponse.organizationId,
       });
+    });
+  });
+
+  // ─────────────────────────────────────────────
+  describe('logout', () => {
+    it('should call userService.logout and return result', async () => {
+      const loggedOutUser = { ...mockUserResponse, isActive: false };
+      mockUserService.logout.mockResolvedValue(loggedOutUser);
+
+      const result = await service.logout(mockUserResponse.id);
+
+      expect(result).toEqual(loggedOutUser);
+      expect(userService.logout).toHaveBeenCalledWith(mockUserResponse.id);
+    });
+
+    it('should throw NotFoundException if user not found', async () => {
+      mockUserService.logout.mockRejectedValue(
+        new HttpException('Utilisateur introuvable', HttpStatus.NOT_FOUND),
+      );
+
+      await expect(service.logout('invalid-id')).rejects.toThrow(HttpException);
     });
   });
 });
