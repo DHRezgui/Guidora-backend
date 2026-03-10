@@ -12,8 +12,9 @@ async function bootstrap() {
   // Activation du CORS pour communiquer avec le frontend
   app.enableCors({
     origin: [
-      'http://localhost:3001',      // Dashboard en local
-      'http://dashboard:3000',      // Dashboard dans Docker
+      'http://localhost:3001',      // Dashboard en local (dev)
+      'http://localhost:3003',      // Dashboard via Docker
+      'http://dashboard:3000',      // Dashboard dans Docker (interne)
       'http://localhost:3000',      // Pour les tests
     ],
     credentials: true,
