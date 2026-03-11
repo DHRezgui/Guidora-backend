@@ -10,43 +10,43 @@ import { BatchTrackEventsDto } from './dto/batch-track-events.dto';
 export class TrackingController {
   constructor(private readonly asyncTrackingService: AsyncTrackingService) {}
 
-  // Envoi asynchrone d'un événement (réponse immédiate)
+  // Asynchronous single event submission (immediate response)
   @Public()
   @Post('events')
   @HttpCode(HttpStatus.ACCEPTED) // 202 Accepted
   @ApiOperation({ 
-    summary: 'Enregistrer un événement (asynchrone)',
-    description: 'Accepte l\'événement et le traite en arrière-plan via RabbitMQ. Réponse immédiate (202) pour ne pas bloquer le client SDK.'
+    summary: 'Track an event (async)',
+    description: 'Accepts the event and processes it in the background via RabbitMQ. Immediate response (202) to avoid blocking the SDK client.'
   })
   @ApiBody({ 
     type: TrackEventDto,
-    description: 'Données de l\'événement à enregistrer',
+    description: 'Event data to track',
   })
   @ApiResponse({ 
     status: 202, 
-    description: 'Événement accepté pour traitement asynchrone',
+    description: 'Event accepted for async processing',
     schema: {
       example: {
         success: true,
-        message: 'Événement accepté',
+        message: 'Event accepted',
         accepted: true
       }
     }
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Événement rejeté (buffer RabbitMQ plein)',
+    description: 'Event rejected (RabbitMQ buffer full)',
     schema: {
       example: {
         success: false,
-        message: 'Événement rejeté (buffer plein)',
+        message: 'Event rejected (buffer full)',
         accepted: false
       }
     }
   })
   @ApiResponse({
     status: 400,
-    description: 'Données invalides',
+    description: 'Invalid data',
     schema: {
       example: {
         message: ['sessionId must be a UUID', 'eventType must be a valid enum value'],
@@ -65,21 +65,21 @@ export class TrackingController {
     };
   }
 
-  // Envoi asynchrone d'un batch (réponse immédiate)
+  // Asynchronous batch submission (immediate response)
   @Public()
   @Post('events/batch')
   @HttpCode(HttpStatus.ACCEPTED) // 202 Accepted
   @ApiOperation({ 
-    summary: 'Enregistrer un batch d\'événements (asynchrone)',
-    description: 'Accepte le batch et le traite en arrière-plan via RabbitMQ. Optimisé pour les performances SDK (envoi groupé).'
+    summary: 'Track a batch of events (async)',
+    description: 'Accepts the batch and processes it in the background via RabbitMQ. Optimized for SDK performance (grouped submission).'
   })
   @ApiBody({
     type: BatchTrackEventsDto,
-    description: 'Batch d\'événements à enregistrer',
+    description: 'Batch of events to track',
   })
   @ApiResponse({ 
     status: 202, 
-    description: 'Batch accepté pour traitement asynchrone',
+    description: 'Batch accepted for async processing',
     schema: {
       example: {
         success: true,
@@ -91,11 +91,11 @@ export class TrackingController {
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Batch rejeté (buffer RabbitMQ plein)',
+    description: 'Batch rejected (RabbitMQ buffer full)',
     schema: {
       example: {
         success: false,
-        message: 'Batch rejeté (buffer plein)',
+        message: 'Batch rejected (buffer full)',
         accepted: false,
         count: 0
       }
@@ -103,7 +103,7 @@ export class TrackingController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Données invalides dans le batch',
+    description: 'Invalid data in the batch',
     schema: {
       example: {
         message: ['events.0.sessionId must be a UUID', 'events.1.eventType must be a valid enum value'],

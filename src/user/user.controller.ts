@@ -20,12 +20,12 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
   @ApiOperation({ 
-    summary: 'Liste des utilisateurs',
-    description: 'Retourne tous les utilisateurs actifs pour les ADMIN'
+    summary: 'List all users',
+    description: 'Returns all active users for ADMIN role'
   })
     @ApiResponse({  
     status: 200, 
-    description: 'Liste des utilisateurs',
+    description: 'List of users',
     schema: {
       example: {
         success: true,
@@ -59,7 +59,7 @@ export class UserController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
@@ -74,18 +74,18 @@ export class UserController {
   }
 
 
-  // Utilisateurs par rôle
+  // Users by role
   @Roles(UserRole.ADMIN)
   @Get('role/:role')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
   @ApiOperation({ 
-    summary: 'Utilisateurs par rôle',
-    description: 'Retourne les utilisateurs filtrés par rôle (ADMIN, DEVELOPER, USER)'
+    summary: 'Users by role',
+    description: 'Returns users filtered by role (ADMIN, DEVELOPER, USER)'
   })
     @ApiResponse({
     status: 200,
-    description: 'Utilisateurs filtrés par rôle',
+    description: 'Users filtered by role',
     schema: {
       example: {
         success: true,
@@ -107,12 +107,12 @@ export class UserController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 500, description: 'Rôle invalide', example: {
+  @ApiResponse({ status: 500, description: 'Invalid role', example: {
     statusCode: 500,
     message: 'Invalid user role',
     error: 'Internal Server Error'
@@ -126,18 +126,18 @@ export class UserController {
     };
   }
 
-  // Utilisateurs actifs
+  // Active users
   @Roles(UserRole.ADMIN)
   @Get('active')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
   @ApiOperation({ 
-    summary: 'Utilisateurs actifs',
-    description: 'Retourne tous les utilisateurs actifs'
+    summary: 'Active users',
+    description: 'Returns all active users'
   })
   @ApiResponse({  
     status: 200, 
-    description: 'Liste des utilisateurs actifs',
+    description: 'List of active users',
     schema: {
       example: {
         success: true,
@@ -171,7 +171,7 @@ export class UserController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
@@ -189,13 +189,13 @@ export class UserController {
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Détails d\'un utilisateur',
-    description: 'Retourne les informations d\'un utilisateur spécifique'
+    summary: 'User details',
+    description: 'Returns the information of a specific user'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Utilisateur trouvé',
+    description: 'User found',
     schema: {
       example: {
         success: true,
@@ -214,13 +214,13 @@ export class UserController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
+  @ApiResponse({ status: 404, description: 'User not found', example: {
+    message: 'User not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -249,14 +249,14 @@ export class UserController {
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Mise à jour d\'un utilisateur',
-    description: 'Met à jour les informations d\'un utilisateur (ADMIN: tout le monde / USER: son propre profil)'
+    summary: 'Update a user',
+    description: 'Updates user information (ADMIN: any user / USER: own profile only)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Utilisateur mis à jour' , schema: {
+  @ApiResponse({ status: 200, description: 'User updated' , schema: {
     example: {
       success: true,
-      message: 'Utilisateur mis à jour avec succès',
+      message: 'User updated successfully',
       user: {
         id: 'uuid-here',
         email: 'john.doe@example.com',
@@ -272,13 +272,13 @@ export class UserController {
       }
     }
   }})
-  @ApiResponse({ status: 403, description: 'Tentative de modification non autorisée', example: {
+  @ApiResponse({ status: 403, description: 'Unauthorized modification attempt', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
+  @ApiResponse({ status: 404, description: 'User not found', example: {
+    message: 'User not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -319,23 +319,23 @@ export class UserController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Suppression d\'un utilisateur',
-    description: 'Supprime un utilisateur (seulement pour les ADMIN)'
+    summary: 'Delete a user',
+    description: 'Deletes a user (ADMIN only)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Utilisateur supprimé' , schema: {
+  @ApiResponse({ status: 200, description: 'User deleted' , schema: {
     example: {
       success: true,
-      message: 'Utilisateur supprimé avec succès',
+      message: 'User deleted successfully',
     }
   }})
-  @ApiResponse({ status: 403, description: 'Tentative de modification non autorisée', example: {
+  @ApiResponse({ status: 403, description: 'Unauthorized modification attempt', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
+  @ApiResponse({ status: 404, description: 'User not found', example: {
+    message: 'User not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -347,19 +347,19 @@ export class UserController {
     };
   }
 
-  // Assigner à une organisation
+  // Assign to an organization
   
   @ApiAuth()
   @Roles(UserRole.ADMIN)
   @Post(':id/assign-organization')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Assigner un utilisateur à une organisation',
-    description: 'Assigne un utilisateur à une organisation spécifique (seulement pour les ADMIN)'
+    summary: 'Assign a user to an organization',
+    description: 'Assigns a user to a specific organization (ADMIN only)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiBody({
-    description: 'Nom de l\'organisation à laquelle assigner l\'utilisateur',
+    description: 'Name of the organization to assign the user to',
     schema: {
       type: 'object',
       required: ['organizationName'],
@@ -367,15 +367,15 @@ export class UserController {
         organizationName: {
           type: 'string',
           example: 'Acme Corporation',
-          description: 'Le nom exact de l\'organisation',
+          description: 'The exact name of the organization',
         },
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'Utilisateur assigné à l\'organisation', schema: {
+  @ApiResponse({ status: 200, description: 'User assigned to organization', schema: {
     example: {
       success: true,
-      message: 'Utilisateur assigné à l\'organisation avec succès',
+      message: 'User assigned to organization successfully',
       user: {
         id: 'uuid-here',
         email: 'john.doe@example.com',
@@ -391,13 +391,13 @@ export class UserController {
       }
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
+  @ApiResponse({ status: 404, description: 'User not found', example: {
+    message: 'User not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -413,20 +413,20 @@ export class UserController {
     };
   }
 
-  // Désassigner d'une organisation
+  // Remove from an organization
   @ApiAuth()
   @Roles(UserRole.ADMIN)
   @Post(':id/remove-organization')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Retirer un utilisateur d\'une organisation',
-    description: 'Retire un utilisateur de son organisation actuelle (seulement pour les ADMIN)'
+    summary: 'Remove a user from an organization',
+    description: 'Removes a user from their current organization (ADMIN only)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Utilisateur retiré de l\'organisation', schema: {
+  @ApiResponse({ status: 200, description: 'User removed from organization', schema: {
     example: {
       success: true,
-      message: 'Utilisateur retiré de l\'organisation avec succès',
+      message: 'User removed from organization successfully',
       user: {
         id: 'uuid-here',
         email: 'john.doe@example.com',
@@ -442,13 +442,13 @@ export class UserController {
       }
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable', example: {
-    message: 'Utilisateur introuvable',
+  @ApiResponse({ status: 404, description: 'User not found', example: {
+    message: 'User not found',
     error: 'Not Found',
     statusCode: 404,
   }})

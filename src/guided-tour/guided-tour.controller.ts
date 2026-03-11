@@ -18,25 +18,25 @@ import { ApiAuth } from '../swagger/security-schemas';
 export class GuidedTourController {
   constructor(private readonly tourService: GuidedTourService) {}
 
-  // Créer un parcours (ADMIN uniquement)
+  // Create a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Créer un nouveau parcours guidé',
-    description: 'Crée un parcours complet avec ses étapes pour une organisation'
+    summary: 'Create a new guided tour',
+    description: 'Creates a complete tour with its steps for an organization'
   })
   @ApiResponse({ 
     status: 201, 
-    description: 'Parcours créé avec succès',
+    description: 'Tour created successfully',
     schema: {
       example: {
         success: true,
-        message: 'Parcours créé avec succès',
+        message: 'Tour created successfully',
         tour: {
           id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-          name: 'Premier virement',
-          description: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+          name: 'First transfer',
+          description: 'Step-by-step guide to make your first bank transfer',
           targetUrl: '/dashboard/transfers',
           isActive: true,
           priority: 10,
@@ -53,8 +53,8 @@ export class GuidedTourController {
             {
               id: 'step-uuid-1',
               orderIndex: 1,
-              title: 'Bienvenue !',
-              content: 'Cliquez ici pour commencer votre premier virement',
+              title: 'Welcome!',
+              content: 'Click here to start your first transfer',
               targetSelector: '#transfer-button',
               position: 'BOTTOM',
               action: 'CLICK',
@@ -66,7 +66,7 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -84,22 +84,22 @@ export class GuidedTourController {
     );
     return {
       success: true,
-      message: 'Parcours créé avec succès',
+      message: 'Tour created successfully',
       tour,
     };
   }
 
-  // Lister les parcours d'une organisation
+  // List tours of an organization
   @Get()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Lister les parcours d\'une organisation',
-    description: 'Retourne tous les parcours (actifs/inactifs) de l\'organisation de l\'utilisateur'
+    summary: 'List tours of an organization',
+    description: 'Returns all tours (active/inactive) of the user\'s organization'
   })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filtrer par statut actif (true = actifs uniquement, false = inactifs uniquement)' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filter by active status (true = active only, false = inactive only)' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Liste des parcours',
+    description: 'List of tours',
     schema: {
       example: {
         success: true,
@@ -107,8 +107,8 @@ export class GuidedTourController {
         tours: [
           {
             id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-            name: 'Premier virement',
-            description: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+            name: 'First transfer',
+            description: 'Step-by-step guide to make your first bank transfer',
             targetUrl: '/dashboard/transfers',
             isActive: true,
             priority: 10,
@@ -121,8 +121,8 @@ export class GuidedTourController {
               {
                 id: 'step-uuid-1',
                 orderIndex: 1,
-                title: 'Bienvenue !',
-                content: 'Cliquez ici pour commencer',
+                title: 'Welcome!',
+                content: 'Click here to start',
                 targetSelector: '#transfer-button',
                 position: 'BOTTOM',
                 action: 'CLICK',
@@ -133,8 +133,8 @@ export class GuidedTourController {
           },
           {
             id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-            name: 'Découverte du tableau de bord',
-            description: 'Présentation des fonctionnalités principales',
+            name: 'Dashboard discovery',
+            description: 'Overview of the main features',
             targetUrl: '/dashboard',
             isActive: false,
             priority: 5,
@@ -149,7 +149,7 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -169,17 +169,17 @@ export class GuidedTourController {
     };
   }
 
-  // Trouver les parcours actifs pour une URL (pour le SDK)
+  // Find active tours for a URL (for the SDK)
   @Get('active/url')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Parcours actifs pour une URL',
-    description: 'Retourne les parcours actifs correspondant à une URL cible (utilisé par le SDK client)'
+    summary: 'Active tours for a URL',
+    description: 'Returns active tours matching a target URL (used by the client SDK)'
   })
-  @ApiQuery({ name: 'url', required: true, type: String, description: 'L\'URL de la page pour laquelle chercher les parcours actifs', example: '/dashboard/transfers' })
+  @ApiQuery({ name: 'url', required: true, type: String, description: 'The page URL to search active tours for', example: '/dashboard/transfers' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Parcours actifs trouvés pour cette URL',
+    description: 'Active tours found for this URL',
     schema: {
       example: {
         success: true,
@@ -187,8 +187,8 @@ export class GuidedTourController {
         tours: [
           {
             id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-            name: 'Premier virement',
-            description: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+            name: 'First transfer',
+            description: 'Step-by-step guide to make your first bank transfer',
             targetUrl: '/dashboard/transfers',
             isActive: true,
             priority: 10,
@@ -201,8 +201,8 @@ export class GuidedTourController {
               {
                 id: 'step-uuid-1',
                 orderIndex: 1,
-                title: 'Bienvenue !',
-                content: 'Cliquez ici pour commencer',
+                title: 'Welcome!',
+                content: 'Click here to start',
                 targetSelector: '#transfer-button',
                 position: 'BOTTOM',
                 action: 'CLICK',
@@ -215,7 +215,7 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -235,24 +235,24 @@ export class GuidedTourController {
     };
   }
 
-  // Détails d'un parcours
+  // Tour details
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Détails d\'un parcours',
-    description: 'Retourne les informations détaillées d\'un parcours avec ses étapes'
+    summary: 'Tour details',
+    description: 'Returns detailed information about a tour with its steps'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Parcours trouvé',
+    description: 'Tour found',
     schema: {
       example: {
         success: true,
         tour: {
           id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-          name: 'Premier virement',
-          description: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+          name: 'First transfer',
+          description: 'Step-by-step guide to make your first bank transfer',
           targetUrl: '/dashboard/transfers',
           isActive: true,
           priority: 10,
@@ -265,8 +265,8 @@ export class GuidedTourController {
             {
               id: 'step-uuid-1',
               orderIndex: 1,
-              title: 'Bienvenue !',
-              content: 'Cliquez ici pour commencer',
+              title: 'Welcome!',
+              content: 'Click here to start',
               targetSelector: '#transfer-button',
               position: 'BOTTOM',
               action: 'CLICK',
@@ -278,14 +278,14 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours non trouvé', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -304,26 +304,26 @@ export class GuidedTourController {
     };
   }
 
-  // Mettre à jour un parcours (ADMIN uniquement)
+  // Update a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Mettre à jour un parcours',
-    description: 'Met à jour les informations et étapes d\'un parcours existant'
+    summary: 'Update a tour',
+    description: 'Updates the information and steps of an existing tour'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Parcours mis à jour',
+    description: 'Tour updated',
     schema: {
       example: {
         success: true,
-        message: 'Parcours mis à jour avec succès',
+        message: 'Tour updated successfully',
         tour: {
           id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-          name: 'Premier virement (modifié)',
-          description: 'Description mise à jour',
+          name: 'First transfer (modified)',
+          description: 'Updated description',
           targetUrl: '/dashboard/transfers',
           isActive: true,
           priority: 20,
@@ -337,14 +337,14 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours non trouvé', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -360,31 +360,31 @@ export class GuidedTourController {
     const tour = await this.tourService.update(id, updateTourDto, organizationId);
     return {
       success: true,
-      message: 'Parcours mis à jour avec succès',
+      message: 'Tour updated successfully',
       tour,
     };
   }
 
-  // Activer/désactiver un parcours (ADMIN uniquement)
+  // Activate/deactivate a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id/activate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Activer/désactiver un parcours',
-    description: 'Change le statut actif/inactif d\'un parcours sans le supprimer'
+    summary: 'Activate/deactivate a tour',
+    description: 'Changes the active/inactive status of a tour without deleting it'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Statut du parcours mis à jour',
+    description: 'Tour status updated',
     schema: {
       example: {
         success: true,
-        message: 'Parcours activé',
+        message: 'Tour activated',
         tour: {
           id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-          name: 'Premier virement',
-          description: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+          name: 'First transfer',
+          description: 'Step-by-step guide to make your first bank transfer',
           targetUrl: '/dashboard/transfers',
           isActive: true,
           priority: 10,
@@ -398,14 +398,14 @@ export class GuidedTourController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours non trouvé', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -421,38 +421,38 @@ export class GuidedTourController {
     const tour = await this.tourService.toggleActive(id, organizationId, isActive);
     return {
       success: true,
-      message: isActive ? 'Parcours activé' : 'Parcours désactivé',
+      message: isActive ? 'Tour activated' : 'Tour deactivated',
       tour,
     };
   }
 
-  // Supprimer un parcours (soft delete - ADMIN uniquement)
+  // Delete a tour (soft delete - ADMIN only)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Supprimer un parcours',
-    description: 'Désactive un parcours (soft delete) pour le masquer des utilisateurs finaux'
+    summary: 'Delete a tour',
+    description: 'Deactivates a tour (soft delete) to hide it from end users'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Parcours désactivé avec succès',
+    description: 'Tour deactivated successfully',
     schema: {
       example: {
         success: true,
-        message: 'Parcours désactivé avec succès',
+        message: 'Tour deactivated successfully',
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours non trouvé', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -467,7 +467,7 @@ export class GuidedTourController {
     await this.tourService.delete(id, organizationId);
     return {
       success: true,
-      message: 'Parcours désactivé avec succès',
+      message: 'Tour deactivated successfully',
     };
   }
 

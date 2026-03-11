@@ -17,13 +17,24 @@ export class RabbitMQService implements OnModuleInit, OnModuleDestroy {
   private isReconnecting = false;
   private consumeCallback: ((message: any) => Promise<void>) | null = null;
 
+  private enabled: boolean;
+
   constructor(private configService: ConfigService) {
     this.queueName = this.configService.get('RABBITMQ_QUEUE') || 'tracking_events';
     this.exchangeName = this.configService.get('RABBITMQ_EXCHANGE') || 'tracking_exchange';
+    this.enabled = this.configService.get('RABBITMQ_ENABLED') !== 'false';
   }
 
   async onModuleInit() {
-    await this.connect();
+    if (!this.enabled) {
+      this.logger.log('RabbitMQ disabled (RABBITMQ_ENABLED=false)');
+      return;
+    }
+    try {
+      await this.connect();
+    } catch (error) {
+      this.logger.warn(`RabbitMQ unavailable, running without it: ${error.message}`);
+    }
   }
 
   async onModuleDestroy() {

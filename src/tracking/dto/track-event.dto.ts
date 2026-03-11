@@ -34,7 +34,7 @@ export class TrackEventDto {
   @IsOptional()
   elementSelector?: string;
 
-  @ApiPropertyOptional({ example: 'Virement bancaire' })
+  @ApiPropertyOptional({ example: 'Bank transfer' })
   @IsString()
   @IsOptional()
   elementText?: string;

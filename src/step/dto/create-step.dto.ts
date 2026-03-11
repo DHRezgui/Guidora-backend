@@ -7,23 +7,23 @@ export class CreateStepDto {
   @IsString({ message: 'Le titre est requis' })
   @IsNotEmpty({ message: 'Le titre ne peut pas être vide' })
   @ApiProperty({ 
-    description: 'Le titre de l\'étape affiché à l\'utilisateur',
-    example: 'Bienvenue !',
+    description: 'The step title displayed to the user',
+    example: 'Welcome!',
   })
   title: string;
 
   @IsString({ message: 'Le contenu est requis' })
   @IsNotEmpty({ message: 'Le contenu ne peut pas être vide' })
   @ApiProperty({ 
-    description: 'Le contenu textuel de l\'étape (instructions pour l\'utilisateur)',
-    example: 'Cliquez ici pour commencer votre premier virement',
+    description: 'The text content of the step (instructions for the user)',
+    example: 'Click here to start your first transfer',
   })
   content: string;
 
   @IsString()
   @IsOptional()
   @ApiProperty({ 
-    description: 'Le sélecteur CSS de l\'élément cible sur la page (ex: #btn, .class, [data-id])',
+    description: 'The CSS selector of the target element on the page (e.g.: #btn, .class, [data-id])',
     example: '#transfer-button',
     required: false,
   })
@@ -32,7 +32,7 @@ export class CreateStepDto {
   @IsEnum(PositionType, { message: 'La position doit être TOP, BOTTOM, LEFT, RIGHT, CENTER, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT ou BOTTOM_RIGHT' })
   @IsOptional()
   @ApiProperty({ 
-    description: 'La position du tooltip par rapport à l\'élément cible',
+    description: 'The tooltip position relative to the target element',
     enum: PositionType,
     enumName: 'PositionType',
     example: PositionType.BOTTOM,
@@ -44,7 +44,7 @@ export class CreateStepDto {
   @IsEnum(ActionType, { message: 'L\'action doit être CLICK, HOVER, SCROLL, NEXT, SKIP ou COMPLETE' })
   @IsOptional()
   @ApiProperty({ 
-    description: 'L\'action requise de l\'utilisateur pour passer à l\'étape suivante',
+    description: 'The action required from the user to proceed to the next step',
     enum: ActionType,
     enumName: 'ActionType',
     example: ActionType.CLICK,
@@ -56,7 +56,7 @@ export class CreateStepDto {
   @IsBoolean()
   @IsOptional()
   @ApiProperty({ 
-    description: 'Indique si l\'utilisateur peut passer cette étape',
+    description: 'Indicates whether the user can skip this step',
     example: true,
     required: false,
     default: true,
@@ -66,7 +66,7 @@ export class CreateStepDto {
   @IsBoolean()
   @IsOptional()
   @ApiProperty({ 
-    description: 'Indique si l\'élément cible doit être mis en surbrillance',
+    description: 'Indicates whether the target element should be highlighted',
     example: true,
     required: false,
     default: true,

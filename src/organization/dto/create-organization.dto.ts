@@ -8,7 +8,7 @@ export class CreateOrganizationDto {
   @MaxLength(255, { message: 'Le nom ne peut pas dépasser 255 caractères' })
   @Transform(({ value }) => value?.trim())
   @ApiProperty({ 
-    description: 'Le nom de l\'organisation',
+    description: 'The name of the organization',
     example: 'Trustdev'
   })
   name: string;
@@ -17,7 +17,7 @@ export class CreateOrganizationDto {
   @MaxLength(255, { message: 'La clé API ne peut pas dépasser 255 caractères' })
   @Transform(({ value }) => value?.trim())
   @ApiProperty({ 
-    description: 'La clé API unique de l\'organisation',
+    description: 'The unique API key of the organization',
     example: 'onb_trustdev_xyz123'
   })
   apiKey: string;
@@ -25,7 +25,7 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsEnum(PlanType, { message: 'Le plan doit être FREE, PRO ou ENTERPRISE' })
   @ApiProperty({ 
-    description: 'Le plan de l\'organisation',
+    description: 'The organization\'s plan',
     example: 'PRO',
     enum: PlanType,
     enumName: 'PlanType',
@@ -39,7 +39,7 @@ export class CreateOrganizationDto {
   @MaxLength(255)
   @Transform(({ value }) => value?.trim())
   @ApiProperty({ 
-    description: 'Le domaine de l\'organisation',
+    description: 'The organization\'s domain',
     example: 'Trustdev.com',
     required: false
   })
@@ -48,7 +48,7 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsObject({ message: 'Les paramètres doivent être un objet JSON' })
   @ApiProperty({ 
-    description: 'Les paramètres de l\'organisation',
+    description: 'The organization\'s settings',
     example: { theme: 'dark', language: 'fr' },
     required: false,
     default: {}
@@ -60,7 +60,7 @@ export class CreateOrganizationDto {
   @Min(1, { message: 'Le nombre minimum de tours est 1' })
   @Max(1000, { message: 'Le nombre maximum de tours est 1000' })
   @ApiProperty({ 
-    description: 'Le nombre maximum de tours autorisés',
+    description: 'The maximum number of tours allowed',
     example: 50,
     required: false
   })
@@ -71,7 +71,7 @@ export class CreateOrganizationDto {
   @Min(1, { message: 'Le nombre minimum d\'utilisateurs est 1' })
   @Max(10000, { message: 'Le nombre maximum d\'utilisateurs est 10000' })
   @ApiProperty({ 
-    description: 'Le nombre maximum d\'utilisateurs autorisés',
+    description: 'The maximum number of users allowed',
     example: 500,
     required: false
   })
@@ -80,7 +80,7 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsBoolean()
   @ApiProperty({ 
-    description: 'Indique si l\'organisation est active',
+    description: 'Indicates whether the organization is active',
     example: true,
     required: false,
     default: true

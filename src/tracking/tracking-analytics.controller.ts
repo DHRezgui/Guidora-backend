@@ -12,20 +12,20 @@ export class TrackingAnalyticsController {
   constructor(private readonly trackingService: TrackingService) {}
 
 
-  // Récupérer les événements d'une session (ADMIN/DEVELOPER)
+  // Retrieve events of a session (ADMIN/DEVELOPER)
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get('sessions/:sessionId/events')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Événements d\'une session',
-    description: 'Retourne tous les événements d\'une session spécifique'
+    summary: 'Session events',
+    description: 'Returns all events of a specific session'
   })
-  @ApiParam({ name: 'sessionId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', description: 'Identifiant unique de la session' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100, description: 'Nombre maximum d\'événements à retourner' })
+  @ApiParam({ name: 'sessionId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', description: 'Unique session identifier' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100, description: 'Maximum number of events to return' })
   @ApiResponse({
     status: 200,
-    description: 'Événements récupérés avec succès',
+    description: 'Events retrieved successfully',
     schema: {
       example: {
         success: true,
@@ -48,7 +48,7 @@ export class TrackingAnalyticsController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Accès refusé - rôle insuffisant',
+    description: 'Access denied - insufficient role',
     schema: {
       example: {
         message: 'Forbidden resource',
@@ -69,19 +69,19 @@ export class TrackingAnalyticsController {
     };
   }
 
-  // Analyser les frictions d'une session (ADMIN/DEVELOPER)
+  // Analyze frictions of a session (ADMIN/DEVELOPER)
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get('sessions/:sessionId/frictions')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Analyse des frictions',
-    description: 'Analyse comportementale pour détecter les signes de friction'
+    summary: 'Friction analysis',
+    description: 'Behavioral analysis to detect signs of friction'
   })
-  @ApiParam({ name: 'sessionId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', description: 'Identifiant unique de la session' })
+  @ApiParam({ name: 'sessionId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', description: 'Unique session identifier' })
   @ApiResponse({
     status: 200,
-    description: 'Analyse des frictions effectuée',
+    description: 'Friction analysis completed',
     schema: {
       example: {
         success: true,
@@ -99,7 +99,7 @@ export class TrackingAnalyticsController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Accès refusé - rôle insuffisant',
+    description: 'Access denied - insufficient role',
     schema: {
       example: {
         message: 'Forbidden resource',
@@ -118,24 +118,24 @@ export class TrackingAnalyticsController {
     };
   }
 
-  // Événements par organisation (ADMIN/DEVELOPER)
+  // Events by organization (ADMIN/DEVELOPER)
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get('organizations/:organizationId/events')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Événements par organisation',
-    description: 'Filtrer les événements par organisation et critères'
+    summary: 'Events by organization',
+    description: 'Filter events by organization and criteria'
   })
-  @ApiParam({ name: 'organizationId', type: String, format: 'uuid', example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', description: 'Identifiant unique de l\'organisation' })
-  @ApiQuery({ name: 'eventType', required: false, enum: EventType, enumName: 'EventType', description: 'Filtrer par type d\'événement' })
-  @ApiQuery({ name: 'startDate', required: false, type: String, example: '2026-02-15T00:00:00Z', description: 'Date de début (ISO 8601)' })
-  @ApiQuery({ name: 'endDate', required: false, type: String, example: '2026-02-15T23:59:59Z', description: 'Date de fin (ISO 8601)' })
-  @ApiQuery({ name: 'pageUrl', required: false, type: String, description: 'Filtrer par URL de page (recherche partielle)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100, description: 'Nombre maximum d\'événements à retourner' })
+  @ApiParam({ name: 'organizationId', type: String, format: 'uuid', example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', description: 'Unique organization identifier' })
+  @ApiQuery({ name: 'eventType', required: false, enum: EventType, enumName: 'EventType', description: 'Filter by event type' })
+  @ApiQuery({ name: 'startDate', required: false, type: String, example: '2026-02-15T00:00:00Z', description: 'Start date (ISO 8601)' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, example: '2026-02-15T23:59:59Z', description: 'End date (ISO 8601)' })
+  @ApiQuery({ name: 'pageUrl', required: false, type: String, description: 'Filter by page URL (partial match)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 100, description: 'Maximum number of events to return' })
   @ApiResponse({
     status: 200,
-    description: 'Événements récupérés avec succès',
+    description: 'Events retrieved successfully',
     schema: {
       example: {
         success: true,
@@ -148,7 +148,7 @@ export class TrackingAnalyticsController {
             eventType: 'CLICK',
             pageUrl: '/dashboard/transfers',
             elementSelector: '#transfer-button',
-            elementText: 'Virement',
+            elementText: 'Transfer',
             timeOnPage: 30,
             metadata: {},
             timestamp: '2026-02-15T10:30:00.000Z'
@@ -159,7 +159,7 @@ export class TrackingAnalyticsController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Accès refusé - rôle insuffisant',
+    description: 'Access denied - insufficient role',
     schema: {
       example: {
         message: 'Forbidden resource',
@@ -170,10 +170,10 @@ export class TrackingAnalyticsController {
   })
   @ApiResponse({
     status: 404,
-    description: 'Organisation introuvable',
+    description: 'Organization not found',
     schema: {
       example: {
-        message: 'Organisation introuvable',
+        message: 'Organization not found',
         error: 'Not Found',
         statusCode: 404
       }
@@ -202,7 +202,7 @@ export class TrackingAnalyticsController {
     };
   }
 
-  // Méthode utilitaire pour calculer le niveau de risque
+  // Utility method to calculate the risk level
   private calculateRiskLevel(frictions: Record<string, number>): string {
     const totalFrictions = Object.values(frictions).reduce((sum: number, count: number) => sum + count, 0);
     

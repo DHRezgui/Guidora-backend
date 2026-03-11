@@ -66,6 +66,7 @@ export class TrackingService {
 
   // Mettre à jour le cache Redis pour une session
   private async updateSessionCache(sessionId: string, eventData: TrackEventDto): Promise<void> {
+    if (!this.redis) return;
     const cacheKey = `session:${sessionId}`;
     const sessionData = await this.redis.get(cacheKey);
 
@@ -96,6 +97,7 @@ export class TrackingService {
 
   // Récupérer les données d'une session
   async getSessionData(sessionId: string): Promise<any> {
+    if (!this.redis) return null;
     const cacheKey = `session:${sessionId}`;
     const sessionData = await this.redis.get(cacheKey);
     return sessionData ? JSON.parse(sessionData) : null;

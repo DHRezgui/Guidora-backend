@@ -8,16 +8,16 @@ export class CreateGuidedTourDto {
   @IsString({ message: 'Le nom est requis' })
   @IsNotEmpty({ message: 'Le nom ne peut pas être vide' })
   @ApiProperty({ 
-    description: 'Le nom du parcours guidé',
-    example: 'Premier virement',
+    description: 'The name of the guided tour',
+    example: 'First transfer',
   })
   name: string;
 
   @IsString()
   @IsOptional()
   @ApiProperty({ 
-    description: 'La description détaillée du parcours guidé',
-    example: 'Guide pas-à-pas pour effectuer votre premier virement bancaire',
+    description: 'The detailed description of the guided tour',
+    example: 'Step-by-step guide to make your first bank transfer',
     required: false,
   })
   description?: string;
@@ -25,7 +25,7 @@ export class CreateGuidedTourDto {
   @IsString({ message: 'L\'URL cible est requise' })
   @IsNotEmpty({ message: 'L\'URL cible ne peut pas être vide' })
   @ApiProperty({ 
-    description: 'L\'URL de la page sur laquelle le parcours se déclenche',
+    description: 'The URL of the page where the tour is triggered',
     example: '/dashboard/transfers',
   })
   targetUrl: string;
@@ -33,7 +33,7 @@ export class CreateGuidedTourDto {
   @IsBoolean()
   @IsOptional()
   @ApiProperty({ 
-    description: 'Indique si le parcours est actif et visible pour les utilisateurs',
+    description: 'Indicates whether the tour is active and visible to users',
     example: true,
     required: false,
     default: true,
@@ -43,7 +43,7 @@ export class CreateGuidedTourDto {
   @IsNumber()
   @IsOptional()
   @ApiProperty({ 
-    description: 'La priorité d\'affichage du parcours (plus élevé = affiché en premier)',
+    description: 'The display priority of the tour (higher = displayed first)',
     example: 10,
     required: false,
     default: 0,
@@ -53,7 +53,7 @@ export class CreateGuidedTourDto {
   @IsObject({ message: 'Les conditions de déclenchement doivent être un objet JSON' })
   @IsOptional()
   @ApiProperty({ 
-    description: 'Les conditions de déclenchement du parcours (temps sur la page, éléments requis, segment utilisateur)',
+    description: 'The trigger conditions for the tour (time on page, required elements, user segment)',
     example: {
       minTimeOnPage: 30,
       requiredElements: ['#transfer-button'],
@@ -68,7 +68,7 @@ export class CreateGuidedTourDto {
   @ValidateNested({ each: true })
   @Type(() => CreateStepDto)
   @ApiProperty({ 
-    description: 'La liste des étapes du parcours guidé (ordonnées automatiquement)',
+    description: 'The list of steps in the guided tour (automatically ordered)',
     type: [CreateStepDto],
   })
   steps: CreateStepDto[];

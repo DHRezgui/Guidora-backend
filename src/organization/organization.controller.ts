@@ -24,22 +24,22 @@ import { error } from 'console';
 export class OrganizationController {
   constructor(private readonly organizationService: OrganizationService) {}
 
-  // Créer une organisation
+  // Create an organization
   @Roles(UserRole.ADMIN)
   @ApiAuth()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Création d\'une organisation',
-    description: 'Crée une nouvelle organisation cliente avec sa clé API'
+    summary: 'Create an organization',
+    description: 'Creates a new client organization with its API key'
   })
   @ApiResponse({ 
     status: 201, 
-    description: 'Organisation créée',
+    description: 'Organization created',
     schema: {
       example: {
         success: true,
-        message: 'Organisation créée avec succès',
+        message: 'Organization created successfully',
         organization: {
           id: 'org-uuid',
           name: 'Acme Corporation',
@@ -53,11 +53,11 @@ export class OrganizationController {
       }
     }
   })
-  @ApiResponse({ status: 409, description: 'Clé API déjà utilisée', example: {
+  @ApiResponse({ status: 409, description: 'API key already in use', example: {
     statusCode: 409,
-    message: 'Cette clé API est déjà utilisée'
+    message: 'This API key is already in use'
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
@@ -71,18 +71,18 @@ export class OrganizationController {
     };
   }
 
-  // Récupérer toutes les organisations
+  // Retrieve all organizations
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Liste des organisations',
-    description: 'Retourne toutes les organisations (ADMIN: toutes / DEVELOPER: lecture seule)'
+    summary: 'List organizations',
+    description: 'Returns all organizations (ADMIN: all / DEVELOPER: read-only)'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Liste des organisations',
+    description: 'List of organizations',
     schema: {
       example: {
         success: true,
@@ -124,7 +124,7 @@ export class OrganizationController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
@@ -138,19 +138,19 @@ export class OrganizationController {
     };
   }
 
-  // Récupérer une organisation par ID
+  // Retrieve an organization by ID
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Détails d\'une organisation',
-    description: 'Retourne les informations détaillées d\'une organisation'
+    summary: 'Organization details',
+    description: 'Returns detailed information about an organization'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'org-uuid-here' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Organisation trouvée',
+    description: 'Organization found',
     schema: {
       example: {
         success: true,
@@ -170,12 +170,12 @@ export class OrganizationController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Organisation non trouvée', example: {
-    message: 'Organisation introuvable',
+  @ApiResponse({ status: 404, description: 'Organization not found', example: {
+    message: 'Organization not found',
     error: 'Not Found',
     statusCode: 404,
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
@@ -188,19 +188,19 @@ export class OrganizationController {
     };
   }
 
-  // Récupérer une organisation avec ses utilisateurs
+  // Retrieve an organization with its users
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id/users')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Utilisateurs d\'une organisation',
-    description: 'Retourne les utilisateurs associés à une organisation (sans mots de passe)'
+    summary: 'Organization users',
+    description: 'Returns users associated with an organization (without passwords)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'org-uuid-here' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Utilisateurs trouvés',
+    description: 'Users found',
     schema: {
       example: {
         success: true,
@@ -237,13 +237,13 @@ export class OrganizationController {
     }
   })
   
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Organisation introuvable', example: {
-    message: 'Organisation introuvable',
+  @ApiResponse({ status: 404, description: 'Organization not found', example: {
+    message: 'Organization not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -255,19 +255,19 @@ export class OrganizationController {
     };
   }
 
-  // Compter les utilisateurs d'une organisation
+  // Count users in an organization
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id/users/count')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Nombre d\'utilisateurs',
-    description: 'Retourne le nombre d\'utilisateurs actifs dans une organisation'
+    summary: 'User count',
+    description: 'Returns the number of active users in an organization'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'org-uuid-here' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Comptage effectué',
+    description: 'Count completed',
     schema: {
       example: {
         success: true,
@@ -275,13 +275,13 @@ export class OrganizationController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Organisation introuvable', example: {
-    message: 'Organisation introuvable',
+  @ApiResponse({ status: 404, description: 'Organization not found', example: {
+    message: 'Organization not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -293,20 +293,20 @@ export class OrganizationController {
     };
   }
 
-  // Mettre à jour une organisation
+  // Update an organization
   @Roles(UserRole.ADMIN)
   @ApiAuth()
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Mise à jour d\'une organisation',
-    description: 'Met à jour les informations d\'une organisation (ADMIN uniquement)'
+    summary: 'Update an organization',
+    description: 'Updates organization information (ADMIN only)'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'org-uuid-here' })
-  @ApiResponse({ status: 200, description: 'Organisation mise à jour', schema: {
+  @ApiResponse({ status: 200, description: 'Organization updated', schema: {
     example: {
       success: true,
-      message: 'Organisation mise à jour avec succès',
+      message: 'Organization updated successfully',
       organization: {
         id: 'org-uuid',
         name: 'Acme Corp',
@@ -316,13 +316,13 @@ export class OrganizationController {
       }
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', example: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', example: {
     message: 'Forbidden resource',
     error: 'Forbidden',
     statusCode: 403
   }})
-  @ApiResponse({ status: 404, description: 'Organisation introuvable', example: {
-    message: 'Organisation introuvable',
+  @ApiResponse({ status: 404, description: 'Organization not found', example: {
+    message: 'Organization not found',
     error: 'Not Found',
     statusCode: 404,
   }})
@@ -338,24 +338,24 @@ export class OrganizationController {
     };
   }
 
-  // Supprimer une organisation
+  // Delete an organization
   @Roles(UserRole.ADMIN)
   @ApiAuth()
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Suppression d\'une organisation',
-    description: 'Supprime définitivement une organisation et désaffecte ses utilisateurs'
+    summary: 'Delete an organization',
+    description: 'Permanently deletes an organization and unassigns its users'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'org-uuid-here' })
-  @ApiResponse({ status: 200, description: 'Organisation supprimée avec succès', schema: {
+  @ApiResponse({ status: 200, description: 'Organization deleted successfully', schema: {
     example: {
       success: true,
-      message: 'Organisation supprimée avec succès',
+      message: 'Organization deleted successfully',
     }
   }})
-  @ApiResponse({ status: 404, description: 'Organisation introuvable', example: {
-    message: 'Organisation introuvable',
+  @ApiResponse({ status: 404, description: 'Organization not found', example: {
+    message: 'Organization not found',
     error: 'Not Found',
     statusCode: 404,
   }})

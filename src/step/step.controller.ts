@@ -37,28 +37,28 @@ import { ApiAuth } from '../swagger/security-schemas';
 export class StepController {
   constructor(private readonly stepService: StepService) {}
 
-  // ✅ Créer une étape dans un parcours (ADMIN uniquement)
+  // ✅ Create a step in a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Post('tour/:tourId')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Ajouter une étape à un parcours',
-    description: 'Crée une nouvelle étape à la fin du parcours spécifié',
+    summary: 'Add a step to a tour',
+    description: 'Creates a new step at the end of the specified tour',
   })
   @ApiParam({ name: 'tourId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({
     status: 201,
-    description: 'Étape créée avec succès',
+    description: 'Step created successfully',
     schema: {
       example: {
         success: true,
-        message: 'Étape ajoutée avec succès',
+        message: 'Step added successfully',
         step: {
           id: 'step-uuid-1',
           tourId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
           orderIndex: 3,
-          title: 'Bienvenue !',
-          content: 'Cliquez ici pour commencer votre premier virement',
+          title: 'Welcome!',
+          content: 'Click here to start your first transfer',
           targetSelector: '#transfer-button',
           position: 'BOTTOM',
           action: 'CLICK',
@@ -70,14 +70,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -97,22 +97,22 @@ export class StepController {
     );
     return {
       success: true,
-      message: 'Étape ajoutée avec succès',
+      message: 'Step added successfully',
       step,
     };
   }
 
-  // ✅ Lister les étapes d'un parcours
+  // ✅ List steps of a tour
   @Get('tour/:tourId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Lister les étapes d\'un parcours',
-    description: 'Retourne toutes les étapes triées par ordre croissant (orderIndex)',
+    summary: 'List steps of a tour',
+    description: 'Returns all steps sorted by ascending order (orderIndex)',
   })
   @ApiParam({ name: 'tourId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({
     status: 200,
-    description: 'Liste des étapes du parcours',
+    description: 'List of tour steps',
     schema: {
       example: {
         success: true,
@@ -122,8 +122,8 @@ export class StepController {
             id: 'step-uuid-1',
             tourId: 'tour-uuid',
             orderIndex: 1,
-            title: 'Bienvenue !',
-            content: 'Cliquez ici pour commencer',
+            title: 'Welcome!',
+            content: 'Click here to start',
             targetSelector: '#transfer-button',
             position: 'BOTTOM',
             action: 'CLICK',
@@ -136,8 +136,8 @@ export class StepController {
             id: 'step-uuid-2',
             tourId: 'tour-uuid',
             orderIndex: 2,
-            title: 'Saisissez le montant',
-            content: 'Entrez le montant du virement',
+            title: 'Enter the amount',
+            content: 'Enter the transfer amount',
             targetSelector: '#amount-input',
             position: 'RIGHT',
             action: 'NEXT',
@@ -150,7 +150,7 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -170,17 +170,17 @@ export class StepController {
     };
   }
 
-  // ✅ Détails d'une étape
+  // ✅ Step details
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Détails d\'une étape',
-    description: 'Retourne les informations détaillées d\'une étape',
+    summary: 'Step details',
+    description: 'Returns detailed information about a step',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-1' })
   @ApiResponse({
     status: 200,
-    description: 'Étape trouvée',
+    description: 'Step found',
     schema: {
       example: {
         success: true,
@@ -188,8 +188,8 @@ export class StepController {
           id: 'step-uuid-1',
           tourId: 'tour-uuid',
           orderIndex: 1,
-          title: 'Bienvenue !',
-          content: 'Cliquez ici pour commencer votre premier virement',
+          title: 'Welcome!',
+          content: 'Click here to start your first transfer',
           targetSelector: '#transfer-button',
           position: 'BOTTOM',
           action: 'CLICK',
@@ -201,14 +201,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Vous n\'avez pas les droits nécessaires', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - You do not have the required permissions', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -227,28 +227,28 @@ export class StepController {
     };
   }
 
-  // ✅ Mettre à jour une étape (ADMIN uniquement)
+  // ✅ Update a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Modifier une étape',
-    description: 'Met à jour le contenu et les paramètres d\'une étape',
+    summary: 'Update a step',
+    description: 'Updates the content and settings of a step',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-1' })
   @ApiResponse({
     status: 200,
-    description: 'Étape mise à jour avec succès',
+    description: 'Step updated successfully',
     schema: {
       example: {
         success: true,
-        message: 'Étape mise à jour avec succès',
+        message: 'Step updated successfully',
         step: {
           id: 'step-uuid-1',
           tourId: 'tour-uuid',
           orderIndex: 1,
-          title: 'Bienvenue (modifié) !',
-          content: 'Contenu mis à jour',
+          title: 'Welcome (modified)!',
+          content: 'Updated content',
           targetSelector: '#new-selector',
           position: 'TOP',
           action: 'HOVER',
@@ -260,14 +260,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -283,38 +283,38 @@ export class StepController {
     const step = await this.stepService.update(id, updateStepDto, organizationId);
     return {
       success: true,
-      message: 'Étape mise à jour avec succès',
+      message: 'Step updated successfully',
       step,
     };
   }
 
-  // ✅ Supprimer une étape (ADMIN uniquement)
+  // ✅ Delete a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Supprimer une étape',
-    description: 'Supprime une étape et réorganise automatiquement l\'ordre des étapes restantes',
+    summary: 'Delete a step',
+    description: 'Deletes a step and automatically reorders the remaining steps',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-1' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Étape supprimée avec succès',
+    description: 'Step deleted successfully',
     schema: {
       example: {
         success: true,
-        message: 'Étape supprimée avec succès',
+        message: 'Step deleted successfully',
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -329,21 +329,21 @@ export class StepController {
     await this.stepService.delete(id, organizationId);
     return {
       success: true,
-      message: 'Étape supprimée avec succès',
+      message: 'Step deleted successfully',
     };
   }
 
-  // ✅ Réorganiser les étapes manuellement (ADMIN uniquement)
+  // ✅ Reorder steps manually (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put('tour/:tourId/reorder')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Réorganiser les étapes',
-    description: 'Définit un nouvel ordre pour toutes les étapes d\'un parcours en fournissant la liste ordonnée des IDs',
+    summary: 'Reorder steps',
+    description: 'Defines a new order for all steps in a tour by providing an ordered list of IDs',
   })
   @ApiParam({ name: 'tourId', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiBody({
-    description: 'Liste ordonnée des IDs des étapes dans le nouvel ordre souhaité',
+    description: 'Ordered list of step IDs in the desired new order',
     schema: {
       type: 'object',
       properties: {
@@ -351,25 +351,25 @@ export class StepController {
           type: 'array',
           items: { type: 'string', format: 'uuid' },
           example: ['step-uuid-3', 'step-uuid-1', 'step-uuid-2'],
-          description: 'Les IDs des étapes dans l\'ordre souhaité',
+          description: 'Step IDs in the desired order',
         },
       },
     },
   })
   @ApiResponse({
     status: 200,
-    description: 'Étapes réorganisées avec succès',
+    description: 'Steps reordered successfully',
     schema: {
       example: {
         success: true,
-        message: 'Étapes réorganisées avec succès',
+        message: 'Steps reordered successfully',
         steps: [
           {
             id: 'step-uuid-3',
             tourId: 'tour-uuid',
             orderIndex: 1,
-            title: 'Étape C (maintenant première)',
-            content: 'Contenu de l\'étape',
+            title: 'Step C (now first)',
+            content: 'Step content',
             position: 'BOTTOM',
             action: 'NEXT',
             skipAllowed: true,
@@ -379,8 +379,8 @@ export class StepController {
             id: 'step-uuid-1',
             tourId: 'tour-uuid',
             orderIndex: 2,
-            title: 'Étape A (maintenant deuxième)',
-            content: 'Contenu de l\'étape',
+            title: 'Step A (now second)',
+            content: 'Step content',
             position: 'BOTTOM',
             action: 'CLICK',
             skipAllowed: true,
@@ -390,8 +390,8 @@ export class StepController {
             id: 'step-uuid-2',
             tourId: 'tour-uuid',
             orderIndex: 3,
-            title: 'Étape B (maintenant troisième)',
-            content: 'Contenu de l\'étape',
+            title: 'Step B (now third)',
+            content: 'Step content',
             position: 'RIGHT',
             action: 'NEXT',
             skipAllowed: false,
@@ -401,14 +401,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Parcours introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Tour not found', schema: {
     example: {
-      message: 'Parcours introuvable',
+      message: 'Tour not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -424,34 +424,34 @@ export class StepController {
     const steps = await this.stepService.reorder(tourId, stepIds, organizationId);
     return {
       success: true,
-      message: 'Étapes réorganisées avec succès',
+      message: 'Steps reordered successfully',
       steps,
     };
   }
 
-  // ✅ Déplacer une étape vers le haut (ADMIN uniquement)
+  // ✅ Move a step up (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id/move-up')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Déplacer l\'étape vers le haut',
-    description: 'Échange la position de l\'étape avec l\'étape précédente (orderIndex - 1)',
+    summary: 'Move step up',
+    description: 'Swaps the position of the step with the previous step (orderIndex - 1)',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-2' })
   @ApiResponse({
     status: 200,
-    description: 'Étape déplacée vers le haut',
+    description: 'Step moved up',
     schema: {
       example: {
         success: true,
-        message: 'Étape déplacée vers le haut',
+        message: 'Step moved up',
         steps: [
           {
             id: 'step-uuid-2',
             tourId: 'tour-uuid',
             orderIndex: 1,
-            title: 'Étape B (montée)',
-            content: 'Contenu',
+            title: 'Step B (moved up)',
+            content: 'Content',
             position: 'BOTTOM',
             action: 'CLICK',
             skipAllowed: true,
@@ -461,8 +461,8 @@ export class StepController {
             id: 'step-uuid-1',
             tourId: 'tour-uuid',
             orderIndex: 2,
-            title: 'Étape A (descendue)',
-            content: 'Contenu',
+            title: 'Step A (moved down)',
+            content: 'Content',
             position: 'BOTTOM',
             action: 'NEXT',
             skipAllowed: true,
@@ -472,14 +472,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -494,34 +494,34 @@ export class StepController {
     const steps = await this.stepService.moveUp(id, organizationId);
     return {
       success: true,
-      message: 'Étape déplacée vers le haut',
+      message: 'Step moved up',
       steps,
     };
   }
 
-  // ✅ Déplacer une étape vers le bas (ADMIN uniquement)
+  // ✅ Move a step down (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id/move-down')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Déplacer l\'étape vers le bas',
-    description: 'Échange la position de l\'étape avec l\'étape suivante (orderIndex + 1)',
+    summary: 'Move step down',
+    description: 'Swaps the position of the step with the next step (orderIndex + 1)',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-1' })
   @ApiResponse({
     status: 200,
-    description: 'Étape déplacée vers le bas',
+    description: 'Step moved down',
     schema: {
       example: {
         success: true,
-        message: 'Étape déplacée vers le bas',
+        message: 'Step moved down',
         steps: [
           {
             id: 'step-uuid-1',
             tourId: 'tour-uuid',
             orderIndex: 2,
-            title: 'Étape A (descendue)',
-            content: 'Contenu',
+            title: 'Step A (moved down)',
+            content: 'Content',
             position: 'BOTTOM',
             action: 'CLICK',
             skipAllowed: true,
@@ -531,8 +531,8 @@ export class StepController {
             id: 'step-uuid-2',
             tourId: 'tour-uuid',
             orderIndex: 1,
-            title: 'Étape B (montée)',
-            content: 'Contenu',
+            title: 'Step B (moved up)',
+            content: 'Content',
             position: 'RIGHT',
             action: 'NEXT',
             skipAllowed: true,
@@ -542,14 +542,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -564,33 +564,33 @@ export class StepController {
     const steps = await this.stepService.moveDown(id, organizationId);
     return {
       success: true,
-      message: 'Étape déplacée vers le bas',
+      message: 'Step moved down',
       steps,
     };
   }
 
-  // ✅ Dupliquer une étape (ADMIN uniquement)
+  // ✅ Duplicate a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Post(':id/duplicate')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Dupliquer une étape',
-    description: 'Crée une copie exacte de l\'étape juste après l\'originale avec un nouvel orderIndex',
+    summary: 'Duplicate a step',
+    description: 'Creates an exact copy of the step right after the original with a new orderIndex',
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'step-uuid-1' })
   @ApiResponse({
     status: 201,
-    description: 'Étape dupliquée avec succès',
+    description: 'Step duplicated successfully',
     schema: {
       example: {
         success: true,
-        message: 'Étape dupliquée avec succès',
+        message: 'Step duplicated successfully',
         step: {
           id: 'step-uuid-new',
           tourId: 'tour-uuid',
           orderIndex: 2,
-          title: 'Bienvenue ! (copie)',
-          content: 'Cliquez ici pour commencer votre premier virement',
+          title: 'Welcome! (copy)',
+          content: 'Click here to start your first transfer',
           targetSelector: '#transfer-button',
           position: 'BOTTOM',
           action: 'CLICK',
@@ -602,14 +602,14 @@ export class StepController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Étape introuvable', schema: {
+  @ApiResponse({ status: 404, description: 'Step not found', schema: {
     example: {
-      message: 'Étape introuvable',
+      message: 'Step not found',
       error: 'Not Found',
       statusCode: 404
     }
   }})
-  @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis', schema: {
+  @ApiResponse({ status: 403, description: 'Access denied - ADMIN role required', schema: {
     example: {
       message: 'Forbidden resource',
       error: 'Forbidden',
@@ -624,7 +624,7 @@ export class StepController {
     const step = await this.stepService.duplicate(id, organizationId);
     return {
       success: true,
-      message: 'Étape dupliquée avec succès',
+      message: 'Step duplicated successfully',
       step,
     };
   }

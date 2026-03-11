@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { UserRole } from '../user/entities/user.entity';
 import { AuthService } from './auth.service';
+import { UserService } from '../user/user.service';
 
 import { LoginUserDto } from '../user/dto/login-user.dto';
 import { CreateUserDto } from '../user/dto/create-user.dto';
@@ -24,23 +25,26 @@ import { ApiAuth } from '../swagger/security-schemas';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService,
+  ) {}
 
   
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Inscription',
-    description: 'Crée un compte utilisateur et retourne les informations de base'
+    summary: 'Register',
+    description: 'Creates a user account and returns basic information'
   })
   @ApiResponse({ 
     status: 201, 
-    description: 'Inscription réussie',
+    description: 'Registration successful',
     schema: {
       example: {
         success: true,
-        message: 'Inscription réussie',
+        message: 'Registration successful',
         access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxx',
         token_type: "Bearer",
         expires_in: 3600,
@@ -55,8 +59,8 @@ export class AuthController {
       }
     }
   })
-  @ApiResponse({ status: 409, description: 'Cet email est déjà utilisé' })
-  @ApiResponse({ status: 400, description: 'Bad Request: Le rôle doit être ADMIN, DEVELOPER ou USER' })
+  @ApiResponse({ status: 409, description: 'This email is already in use' })
+  @ApiResponse({ status: 400, description: 'Bad Request: Role must be ADMIN, DEVELOPER or USER' })
   async register(@Body() createUserDto: CreateUserDto) {
     const result = await this.authService.register(createUserDto);
     return {
@@ -71,16 +75,16 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Connexion',
-    description: 'Authentifie un utilisateur et retourne un token JWT'
+    summary: 'Login',
+    description: 'Authenticates a user and returns a JWT token'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Connexion réussie',
+    description: 'Login successful',
     schema: {
       example: {
         success: true,
-        message: 'Connexion réussie',
+        message: 'Login successful',
         access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxx',
         token_type: "Bearer",
         expires_in: 3600,
@@ -95,7 +99,7 @@ export class AuthController {
       }
     }
   })
-  @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
+  @ApiResponse({ status: 401, description: 'Invalid email or password' })
   async login(@Body() loginUserDto: LoginUserDto) {
     const result = await this.authService.login(loginUserDto);
     return {
@@ -110,12 +114,12 @@ export class AuthController {
   @Get('profile')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Profil utilisateur',
-    description: 'Retourne les informations de l\'utilisateur connecté'
+    summary: 'User profile',
+    description: 'Returns the information of the currently authenticated user'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Profil récupéré',
+    description: 'Profile retrieved',
     schema: {
       example: {
         success: true,
@@ -129,9 +133,10 @@ export class AuthController {
     }
   })
   async getProfile(@CurrentUser() user: any) {
+    const fullUser = await this.userService.findById(user.id);
     return {
       success: true,
-      user,
+      user: fullUser,
     };
   }
 
@@ -140,16 +145,16 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Rafraîchissement du token',
-    description: 'Génère un nouveau token JWT valide pour 1h supplémentaire'
+    summary: 'Token refresh',
+    description: 'Generates a new JWT token valid for an additional hour'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Token rafraîchi',
+    description: 'Token refreshed',
     schema: {
       example: {
         success: true,
-        message: 'Token renouvelé',
+        message: 'Token renewed',
         access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.newtoken',
         token_type: "Bearer",
         expires_in: 3600,
@@ -178,16 +183,16 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Déconnexion',
-    description: 'Déconnecte l\'utilisateur connecté'
+    summary: 'Logout',
+    description: 'Logs out the currently authenticated user'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Déconnexion réussie',
+    description: 'Logout successful',
     schema: {
       example: {
         success: true,
-        message: 'Déconnexion réussie',
+        message: 'Logout successful',
         user: {
           id: 'uuid-here',
           email: 'dhia@trustdev.com',
@@ -200,7 +205,7 @@ export class AuthController {
       }
     }
   })
-  @ApiResponse({ status: 404, description: 'Utilisateur introuvable' })
+  @ApiResponse({ status: 404, description: 'User not found' })
   async logout(@CurrentUser() currentUser: any) {
     const user = await this.authService.logout(currentUser.id);
     return {

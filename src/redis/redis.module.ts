@@ -17,6 +17,11 @@ export class RedisModule {
     const redisProvider = {
       provide: REDIS_CLIENT,
       useFactory: () => {
+        const enabled = process.env.REDIS_ENABLED !== 'false';
+        if (!enabled) {
+          console.log('[RedisModule] Redis disabled (REDIS_ENABLED=false)');
+          return null;
+        }
         return new Redis({
           host: options.host,
           port: options.port,

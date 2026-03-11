@@ -6,29 +6,29 @@ import { UserRole } from '../user/entities/user.entity';
 import { BehaviorAnalysisService } from './behavior-analysis.service';
 import { ApiAuth } from '../swagger/security-schemas';
 
-@ApiTags('Analyse Comportementale')
+@ApiTags('Behavior Analysis')
 @Controller('analysis')
 @UseGuards(RolesGuard)
 @ApiAuth()
 export class BehaviorAnalysisController {
   constructor(private readonly analysisService: BehaviorAnalysisService) {}
 
-  // Analyser une session spécifique
+  // Analyze a specific session
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Post('sessions/:sessionId/analyze')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ 
-    summary: 'Analyser une session',
-    description: 'Effectue une analyse comportementale complète d\'une session utilisateur'
+    summary: 'Analyze a session',
+    description: 'Performs a complete behavioral analysis of a user session'
   })
   @ApiParam({ name: 'sessionId', type: String, format: 'uuid' })
   @ApiResponse({ 
     status: 201, 
-    description: 'Analyse effectuée',
+    description: 'Analysis completed',
     schema: {
       example: {
         success: true,
-        message: 'Analyse effectuée',
+        message: 'Analysis completed',
         analysis: {
           id: 'analysis-uuid',
           sessionId: 'sess-uuid',
@@ -48,22 +48,22 @@ export class BehaviorAnalysisController {
     };
   }
 
-  // Analyser toutes les sessions d'une organisation
+  // Analyze all sessions of an organization
   @Roles(UserRole.ADMIN)
   @Post('organizations/:organizationId/analyze')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ 
-    summary: 'Analyser toutes les sessions',
-    description: 'Lance l\'analyse comportementale de toutes les sessions d\'une organisation'
+    summary: 'Analyze all sessions',
+    description: 'Launches behavioral analysis of all sessions in an organization'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   @ApiResponse({ 
     status: 202, 
-    description: 'Analyse en cours',
+    description: 'Analysis in progress',
     schema: {
       example: {
         success: true,
-        message: 'Analyse en cours',
+        message: 'Analysis in progress',
         processedSessions: 150
       }
     }
@@ -77,18 +77,18 @@ export class BehaviorAnalysisController {
     };
   }
 
-  // Obtenir les statistiques d'une organisation
+  // Get organization statistics
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get('organizations/:organizationId/stats')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Statistiques organisation',
-    description: 'Retourne les métriques agrégées d\'une organisation'
+    summary: 'Organization statistics',
+    description: 'Returns aggregated metrics for an organization'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Statistiques récupérées',
+    description: 'Statistics retrieved',
     schema: {
       example: {
         success: true,
@@ -114,17 +114,17 @@ export class BehaviorAnalysisController {
     };
   }
 
-  // Obtenir les tendances temporelles
+  // Get time series trends
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
   @Get('organizations/:organizationId/trends')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Tendances temporelles',
-    description: 'Retourne les données temporelles pour visualisation'
+    summary: 'Time series trends',
+    description: 'Returns time series data for visualization'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   @ApiQuery({ name: 'days', required: false, type: Number, example: 30 })
-  @ApiResponse({ status: 200, description: 'Tendances récupérées' })
+  @ApiResponse({ status: 200, description: 'Trends retrieved' })
   async getTimeSeries(@Param('organizationId') organizationId: string, @Query('days') days: number = 30) {
     const data = await this.analysisService.getTimeSeriesData(organizationId, days);
     return {
@@ -134,16 +134,16 @@ export class BehaviorAnalysisController {
     };
   }
 
-  // Préparer le dataset ML
+  // Prepare ML dataset
   @Roles(UserRole.ADMIN)
   @Get('organizations/:organizationId/ml-dataset')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Dataset ML',
-    description: 'Prépare et retourne le dataset pour l\'entraînement ML'
+    summary: 'ML Dataset',
+    description: 'Prepares and returns the dataset for ML training'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Dataset préparé' })
+  @ApiResponse({ status: 200, description: 'Dataset prepared' })
   async getMLDataset(@Param('organizationId') organizationId: string) {
     const dataset = await this.analysisService.prepareMLDataset(organizationId);
     return {
@@ -153,13 +153,13 @@ export class BehaviorAnalysisController {
     };
   }
 
-  // Exporter les données ML au format CSV
+  // Export ML data as CSV
   @Roles(UserRole.ADMIN)
   @Get('organizations/:organizationId/ml-export')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
-    summary: 'Export ML CSV',
-    description: 'Exporte les données ML au format CSV pour entraînement externe'
+    summary: 'ML CSV Export',
+    description: 'Exports ML data in CSV format for external training'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   async exportMLData(@Param('organizationId') organizationId: string) {
