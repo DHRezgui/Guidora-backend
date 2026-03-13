@@ -302,4 +302,52 @@ export class UserService {
     return result.affected || 0;
   }
 
+  // PASSWORD RESET TOKEN MANAGEMENT 
+
+  async setResetPasswordToken(userId: string, token: string, expires: Date): Promise<void> {
+    await this.userRepository.update(userId, {
+      resetPasswordToken: token,
+      resetPasswordExpires: expires,
+    });
+  }
+
+  async findByResetToken(token: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { resetPasswordToken: token },
+    });
+  }
+
+  async resetPassword(userId: string, newPassword: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    user.password = newPassword;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+    await this.userRepository.save(user);
+  }
+
+  //  EMAIL VERIFICATION TOKEN MANAGEMENT 
+
+  async setEmailVerificationToken(userId: string, token: string): Promise<void> {
+    await this.userRepository.update(userId, {
+      emailVerificationToken: token,
+    });
+  }
+
+  async findByEmailVerificationToken(token: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { emailVerificationToken: token },
+    });
+  }
+
+  async verifyEmail(userId: string): Promise<void> {
+    await this.userRepository.update(userId, {
+      emailVerified: true,
+      emailVerificationToken: null,
+    });
+  }
+
 }

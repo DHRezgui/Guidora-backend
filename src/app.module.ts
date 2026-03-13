@@ -14,6 +14,13 @@ import { TrackingModule } from './tracking/tracking.module';
 import { RedisModule } from './redis/redis.module';
 import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
 import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.module';
+import { MailModule } from './mail/mail.module';
+import { User } from './user/entities/user.entity';
+import { Organization } from './organization/entities/organization.entity';
+import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
+import { Step } from './step/entities/step.entity';
+import { BehaviorEvent } from './tracking/entities/behavior_event.entity';
+import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis.entity';
 
 @Module({
   imports: [
@@ -36,7 +43,7 @@ import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.mo
       username: process.env.DB_USER || 'admin',
       password: process.env.DB_PASSWORD || 'password123',
       database: process.env.DB_NAME || 'onboarding',
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
+      entities: [User, Organization, GuidedTour, Step, BehaviorEvent, BehaviorAnalysis],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',
       uuidExtension: 'pgcrypto',
@@ -44,6 +51,7 @@ import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.mo
     UserModule,
     OrganizationModule,
     AuthModule,
+    MailModule,
     GuidedTourModule,
     StepModule,
     TrackingModule,

@@ -48,6 +48,15 @@ export class User {
   @Column({ type: 'boolean', name: 'email_verified', default: false })
   emailVerified: boolean;
 
+  @Column({ type: 'varchar', length: 255, name: 'email_verification_token', nullable: true })
+  emailVerificationToken: string | null;
+
+  @Column({ type: 'varchar', length: 255, name: 'reset_password_token', nullable: true })
+  resetPasswordToken: string | null;
+
+  @Column({ type: 'timestamptz', name: 'reset_password_expires', nullable: true })
+  resetPasswordExpires: Date | null;
+
   @Column({ type: 'timestamptz', name: 'last_login_at', nullable: true })
   lastLoginAt: Date;
 

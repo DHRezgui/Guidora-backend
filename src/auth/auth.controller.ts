@@ -9,6 +9,7 @@ import {
   Param,
   ParseUUIDPipe,
   HttpException,
+  Query,
 } from '@nestjs/common';
 import { UserRole } from '../user/entities/user.entity';
 import { AuthService } from './auth.service';
@@ -16,6 +17,9 @@ import { UserService } from '../user/user.service';
 
 import { LoginUserDto } from '../user/dto/login-user.dto';
 import { CreateUserDto } from '../user/dto/create-user.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -212,6 +216,78 @@ export class AuthController {
       success: true,
       message: 'Déconnexion réussie',
       user,
+    };
+  }
+
+  // ===== FORGOT PASSWORD =====
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Forgot password',
+    description: 'Sends a password reset email to the user',
+  })
+  @ApiResponse({ status: 200, description: 'Reset email sent (always returns success)' })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    await this.authService.forgotPassword(forgotPasswordDto.email);
+    return {
+      success: true,
+      message: 'Si un compte existe avec cet email, un lien de réinitialisation a été envoyé',
+    };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset password',
+    description: 'Resets the user password using a valid reset token',
+  })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    await this.authService.resetPassword(resetPasswordDto.token, resetPasswordDto.password);
+    return {
+      success: true,
+      message: 'Mot de passe réinitialisé avec succès',
+    };
+  }
+
+  // ===== EMAIL VERIFICATION =====
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify email',
+    description: 'Verifies the user email address using a verification token',
+  })
+  @ApiResponse({ status: 200, description: 'Email verified successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid verification token' })
+  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    await this.authService.verifyEmail(verifyEmailDto.token);
+    return {
+      success: true,
+      message: 'Email vérifié avec succès',
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiAuth()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend verification email',
+    description: 'Resends the email verification link to the current user',
+  })
+  @ApiResponse({ status: 200, description: 'Verification email sent' })
+  @ApiResponse({ status: 400, description: 'Email already verified' })
+  async resendVerification(@CurrentUser() user: any) {
+    await this.authService.resendVerificationEmail(user.id);
+    return {
+      success: true,
+      message: 'Email de vérification renvoyé',
     };
   }
 }
