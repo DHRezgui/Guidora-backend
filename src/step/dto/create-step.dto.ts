@@ -1,9 +1,27 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsNumber, Min } from 'class-validator';
 import { PositionType, ActionType } from '../enums/tour.enums';
 
 
 export class CreateStepDto {
+  @IsString()
+  @IsOptional()
+  @ApiProperty({
+    description: 'Optional client-side step ID (ignored on creation)',
+    required: false,
+  })
+  id?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @ApiProperty({
+    description: 'The display order of the step in the tour (1-based)',
+    example: 1,
+    required: false,
+  })
+  orderIndex?: number;
+
   @IsString({ message: 'Le titre est requis' })
   @IsNotEmpty({ message: 'Le titre ne peut pas être vide' })
   @ApiProperty({ 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe, Query, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -17,6 +17,14 @@ import { ApiAuth } from '../swagger/security-schemas';
 @ApiAuth()
 export class GuidedTourController {
   constructor(private readonly tourService: GuidedTourService) {}
+
+  private getOrganizationId(user: any): string {
+    const organizationId = user?.organizationId || user?.organizations?.[0]?.id;
+    if (!organizationId) {
+      throw new BadRequestException('Aucune organisation associee a cet utilisateur.');
+    }
+    return organizationId;
+  }
 
   // Create a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
@@ -77,9 +85,10 @@ export class GuidedTourController {
     @Body() createTourDto: CreateGuidedTourDto,
     @CurrentUser() user: any,
   ) {
+    const organizationId = this.getOrganizationId(user);
     const tour = await this.tourService.create(
       createTourDto,
-      user.organizationId || user.organizations?.[0]?.id,
+      organizationId,
       user.id,
     );
     return {
@@ -160,7 +169,7 @@ export class GuidedTourController {
     @CurrentUser() user: any,
     @Query('isActive') isActive?: boolean,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     const tours = await this.tourService.findAllByOrganization(organizationId, isActive);
     return {
       success: true,
@@ -226,7 +235,7 @@ export class GuidedTourController {
     @Query('url') url: string,
     @CurrentUser() user: any,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     const tours = await this.tourService.findActiveToursForUrl(url, organizationId);
     return {
       success: true,
@@ -296,7 +305,7 @@ export class GuidedTourController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: any,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     const tour = await this.tourService.findById(id, organizationId);
     return {
       success: true,
@@ -356,7 +365,7 @@ export class GuidedTourController {
     @Body() updateTourDto: UpdateGuidedTourDto,
     @CurrentUser() user: any,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     const tour = await this.tourService.update(id, updateTourDto, organizationId);
     return {
       success: true,
@@ -417,7 +426,7 @@ export class GuidedTourController {
     @Body('isActive') isActive: boolean,
     @CurrentUser() user: any,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     const tour = await this.tourService.toggleActive(id, organizationId, isActive);
     return {
       success: true,
@@ -463,7 +472,7 @@ export class GuidedTourController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: any,
   ) {
-    const organizationId = user.organizationId || user.organizations?.[0]?.id;
+    const organizationId = this.getOrganizationId(user);
     await this.tourService.delete(id, organizationId);
     return {
       success: true,
