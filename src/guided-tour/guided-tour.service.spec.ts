@@ -19,6 +19,7 @@ describe('GuidedTourService', () => {
     findOneOrFail: jest.fn(),
     find: jest.fn(),
     delete: jest.fn(),
+    remove: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
 
@@ -400,22 +401,19 @@ describe('GuidedTourService', () => {
 
   // ─────────────────────────────────────────────
   describe('delete', () => {
-    it('should soft-delete a tour by setting isActive to false', async () => {
-      const existingTour = { ...mockTourEntity, isActive: true, steps: [mockStepEntity] };
-
-      mockTourRepository.findOne.mockResolvedValue(existingTour);
-      mockTourRepository.save.mockResolvedValue({ ...existingTour, isActive: false });
+    it('should hard-delete a tour', async () => {
+      mockTourRepository.delete.mockResolvedValue({ affected: 1 });
 
       await service.delete('tour-uuid-1234', orgId);
 
-      expect(existingTour.isActive).toBe(false);
-      expect(mockTourRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ isActive: false }),
-      );
+      expect(mockTourRepository.delete).toHaveBeenCalledWith({
+        id: 'tour-uuid-1234',
+        organizationId: orgId,
+      });
     });
 
     it('should throw NotFoundException when deleting nonexistent tour', async () => {
-      mockTourRepository.findOne.mockResolvedValue(null);
+      mockTourRepository.delete.mockResolvedValue({ affected: 0 });
 
       await expect(service.delete('nonexistent', orgId)).rejects.toThrow(
         NotFoundException,

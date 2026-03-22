@@ -435,22 +435,22 @@ export class GuidedTourController {
     };
   }
 
-  // Delete a tour (soft delete - ADMIN only)
+  // Delete a tour (hard delete - ADMIN only)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
     summary: 'Delete a tour',
-    description: 'Deactivates a tour (soft delete) to hide it from end users'
+    description: 'Permanently deletes a tour and its steps'
   })
   @ApiParam({ name: 'id', type: String, format: 'uuid', example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
   @ApiResponse({ 
     status: 200, 
-    description: 'Tour deactivated successfully',
+    description: 'Tour deleted successfully',
     schema: {
       example: {
         success: true,
-        message: 'Tour deactivated successfully',
+        message: 'Tour deleted successfully',
       }
     }
   })
@@ -476,7 +476,7 @@ export class GuidedTourController {
     await this.tourService.delete(id, organizationId);
     return {
       success: true,
-      message: 'Tour deactivated successfully',
+      message: 'Tour deleted successfully',
     };
   }
 

@@ -60,7 +60,8 @@ export class GuidedTourService {
       .createQueryBuilder('tour')
       .leftJoinAndSelect('tour.steps', 'step')
       .where('tour.organization_id = :organizationId', { organizationId })
-      .orderBy('tour.priority', 'DESC')
+      .orderBy('tour.is_active', 'DESC')
+      .addOrderBy('tour.priority', 'DESC')
       .addOrderBy('tour.createdAt', 'DESC');
 
     if (isActive !== undefined) {
@@ -123,11 +124,12 @@ export class GuidedTourService {
     return this.findById(id, organizationId);
   }
 
-  // Supprimer un parcours (soft delete via isActive)
+  // Supprimer un parcours (hard delete)
   async delete(id: string, organizationId: string): Promise<void> {
-    const tour = await this.findById(id, organizationId);
-    tour.isActive = false;
-    await this.tourRepository.save(tour);
+    const result = await this.tourRepository.delete({ id, organizationId });
+    if (!result.affected) {
+      throw new NotFoundException(`Parcours introuvable ou vous n'avez pas les permissions`);
+    }
   }
 
   // Activer/désactiver un parcours

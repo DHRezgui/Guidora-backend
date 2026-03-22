@@ -122,7 +122,7 @@ describe('GuidedTourController', () => {
 
       expect(result).toEqual({
         success: true,
-        message: 'Parcours créé avec succès',
+        message: 'Tour created successfully',
         tour: mockTourResponse,
       });
       expect(service.create).toHaveBeenCalledWith(
@@ -149,7 +149,7 @@ describe('GuidedTourController', () => {
       const result = await controller.create(createTourDto, mockCurrentUser);
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('Parcours créé avec succès');
+      expect(result.message).toBe('Tour created successfully');
     });
 
     it('should use organizations array fallback if organizationId is null', async () => {
@@ -300,7 +300,7 @@ describe('GuidedTourController', () => {
 
       expect(result).toEqual({
         success: true,
-        message: 'Parcours mis à jour avec succès',
+        message: 'Tour updated successfully',
         tour: updatedTour,
       });
       expect(service.update).toHaveBeenCalledWith(
@@ -333,7 +333,7 @@ describe('GuidedTourController', () => {
 
       expect(result).toEqual({
         success: true,
-        message: 'Parcours activé',
+        message: 'Tour activated',
         tour: activatedTour,
       });
       expect(service.toggleActive).toHaveBeenCalledWith(
@@ -351,7 +351,7 @@ describe('GuidedTourController', () => {
 
       expect(result).toEqual({
         success: true,
-        message: 'Parcours désactivé',
+        message: 'Tour deactivated',
         tour: deactivatedTour,
       });
     });
@@ -369,14 +369,14 @@ describe('GuidedTourController', () => {
 
   // ─────────────────────────────────────────────
   describe('delete', () => {
-    it('should delete (soft) a tour successfully', async () => {
+    it('should delete a tour successfully', async () => {
       mockGuidedTourService.delete.mockResolvedValue(undefined);
 
       const result = await controller.delete('tour-uuid-1234', mockCurrentUser);
 
       expect(result).toEqual({
         success: true,
-        message: 'Parcours désactivé avec succès',
+        message: 'Tour deleted successfully',
       });
       expect(service.delete).toHaveBeenCalledWith(
         'tour-uuid-1234',
