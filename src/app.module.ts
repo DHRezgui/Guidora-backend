@@ -21,6 +21,8 @@ import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
 import { Step } from './step/entities/step.entity';
 import { BehaviorEvent } from './tracking/entities/behavior_event.entity';
 import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis.entity';
+import { DataAggregationModule } from './data-aggregation/data-aggregation.module';
+import { MlModule } from './ml/ml.module';
 
 @Module({
   imports: [
@@ -57,6 +59,8 @@ import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis
     TrackingModule,
     RabbitmqModule,
     BehaviorAnalysisModule,
+    DataAggregationModule,
+    MlModule,
   ],
   controllers: [AppController],  
   providers: [

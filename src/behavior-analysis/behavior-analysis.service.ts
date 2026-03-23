@@ -45,12 +45,6 @@ export class BehaviorAnalysisService {
       hesitations: pageAnalysis.hesitations,
       abandonmentRisk,
       helpTriggered: abandonmentRisk > 0.65, // Seuil configurable
-      analysisData: {
-        totalEvents: events.length,
-        eventTypes: this.countEventTypes(events),
-        uniquePages: pageAnalysis.uniquePages,
-        patterns: this.detectPatterns(events),
-      },
     });
 
     // Sauvegarder l'analyse
