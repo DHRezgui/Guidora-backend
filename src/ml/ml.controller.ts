@@ -1,11 +1,19 @@
-import { Controller, Get, Param, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Param, HttpCode, HttpStatus, Post, UseGuards, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../user/entities/user.entity';
 import { DatasetGeneratorService } from './dataset-generator.service';
+import { PredictionService } from './prediction.service';
 import { ApiAuth } from '../swagger/security-schemas';
 import { BehaviorAnalysisService } from '../behavior-analysis/behavior-analysis.service';
+import {
+  BatchPredictionRequestDto,
+  BatchPredictionResponseDto,
+  PredictionRequestDto,
+  PredictionResponseDto,
+  ModelHealthDto,
+} from './dto/prediction.dto';
 
 @ApiTags('Machine Learning')
 @Controller('ml')
@@ -14,6 +22,7 @@ import { BehaviorAnalysisService } from '../behavior-analysis/behavior-analysis.
 export class MlController {
   constructor(
     private readonly datasetService: DatasetGeneratorService,
+    private readonly predictionService: PredictionService,
     private readonly behaviorAnalysisService: BehaviorAnalysisService,
   ) {}
 
@@ -292,5 +301,169 @@ export class MlController {
       processedSessions,
       datasetQuality: quality,
     };
+  }
+
+  // Real-time prediction endpoints
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER, UserRole.USER)
+  @Post('predictions/abandonment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Predict abandonment risk',
+    description: 'Real-time prediction of user abandonment risk based on behavioral features. Returns abandonment probability and confidence score.',
+  })
+  @ApiBody({
+    type: PredictionRequestDto,
+    description: 'Behavioral features payload for real-time prediction',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Prediction completed successfully',
+    schema: {
+      example: {
+        success: true,
+        prediction: {
+          abandonmentRisk: 0.325,
+          willAbandon: false,
+          confidence: 0.95,
+          threshold: 0.5,
+        },
+        timestamp: '2026-03-25T10:30:00.000Z',
+        metadata: {
+          modelVersion: '1.0',
+          executionTimeMs: 145,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid features',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Features validation failed',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Access denied',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Model error - prediction failed',
+    schema: {
+      example: {
+        success: false,
+        error: 'Model not loaded. Service may not be fully initialized.',
+        timestamp: '2026-03-25T10:30:00.000Z',
+      },
+    },
+  })
+  async predictAbandonment(
+    @Body() requestDto: PredictionRequestDto,
+  ): Promise<PredictionResponseDto> {
+    return this.predictionService.predict(requestDto);
+  }
+
+  /**
+   * Batch predictions for multiple user sessions
+   */
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Post('predictions/batch')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch abandonment predictions',
+    description: 'Predict abandonment risk for multiple user sessions in a single request. Useful for bulk analysis.',
+  })
+  @ApiBody({
+    type: BatchPredictionRequestDto,
+    description: 'Batch payload containing multiple prediction requests',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Batch predictions completed',
+    schema: {
+      example: {
+        success: true,
+        total: 2,
+        predictions: [
+          {
+            success: true,
+            prediction: {
+              abandonmentRisk: 0.325,
+              willAbandon: false,
+              confidence: 0.95,
+              threshold: 0.5,
+            },
+            timestamp: '2026-03-25T10:30:00.000Z',
+          },
+        ],
+        timestamp: '2026-03-25T10:30:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid batch structure',
+    schema: {
+      example: {
+        message: ['predictions should not be empty'],
+        error: 'Bad Request',
+        statusCode: 400,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Access denied',
+  })
+  async batchPredict(
+    @Body() requestDto: BatchPredictionRequestDto,
+  ): Promise<BatchPredictionResponseDto> {
+    const results: PredictionResponseDto[] = [];
+
+    for (const predictionReq of requestDto.predictions) {
+      const result = await this.predictionService.predict(predictionReq);
+      results.push(result);
+    }
+
+    return {
+      success: true,
+      total: results.length,
+      predictions: results,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Check prediction model health
+   */
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Get('predictions/health')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Model health check',
+    description: 'Check if the abandonment prediction model is loaded and ready for inference.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Health check completed',
+    schema: {
+      example: {
+        success: true,
+        modelLoaded: true,
+        modelVersion: '1.0',
+        featureCount: 14,
+        lastUpdated: '2026-03-25T10:30:00.000Z',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Access denied',
+  })
+  async checkModelHealth(): Promise<ModelHealthDto> {
+    return this.predictionService.getModelHealth();
   }
 }
