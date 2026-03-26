@@ -15,6 +15,7 @@ import { RedisModule } from './redis/redis.module';
 import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
 import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.module';
 import { MailModule } from './mail/mail.module';
+import { FaqModule } from './faq/faq.module';
 import { User } from './user/entities/user.entity';
 import { Organization } from './organization/entities/organization.entity';
 import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
@@ -54,6 +55,7 @@ import { MlModule } from './ml/ml.module';
     OrganizationModule,
     AuthModule,
     MailModule,
+    FaqModule,
     GuidedTourModule,
     StepModule,
     TrackingModule,
