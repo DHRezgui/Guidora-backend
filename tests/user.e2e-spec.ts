@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+﻿import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppFactory } from './utils/test-app.factory';
@@ -48,7 +48,7 @@ describe('UserController (e2e)', () => {
 
       expect(response.body.success).toBe(true);
       expect(response.body.user.id).toBeDefined();
-      expect(response.body.user.password).toBeUndefined(); // ✅ Password non exposé
+      expect(response.body.user.password).toBeUndefined(); //  Password non exposé
     });
 
     it('/user/login (POST) should authenticate without auth', async () => {
@@ -106,7 +106,7 @@ describe('UserController (e2e)', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.count).toBeGreaterThanOrEqual(3); // Admin + 2 users
       response.body.users.forEach((user: any) => {
-        expect(user.password).toBeUndefined(); // ✅ Password non exposé
+        expect(user.password).toBeUndefined(); //  Password non exposé
       });
     });
 

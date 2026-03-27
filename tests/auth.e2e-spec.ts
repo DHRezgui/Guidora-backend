@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+﻿import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppFactory } from './utils/test-app.factory';
@@ -52,7 +52,7 @@ describe('AuthController (e2e)', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.user).toHaveProperty('id');
       expect(response.body.user.email).toBe(registerDto.email);
-      expect(response.body.user.password).toBeUndefined(); // ✅ Password non exposé
+      expect(response.body.user.password).toBeUndefined(); //  Password non exposé
     });
 
     it('should return 409 if email already exists', async () => {
@@ -107,7 +107,7 @@ describe('AuthController (e2e)', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.access_token).toBeDefined();
       expect(response.body.user.id).toBe(user.id);
-      expect(response.body.user.password).toBeUndefined(); // ✅ Password non exposé
+      expect(response.body.user.password).toBeUndefined(); //  Password non exposé
     });
 
     it('should return 401 for invalid password', async () => {
@@ -171,7 +171,7 @@ describe('AuthController (e2e)', () => {
       expect(response.body.user.id).toBe(user.id);
       expect(response.body.user.email).toBe(user.email);
       expect(response.body.user.role).toBe('ADMIN');
-      expect(response.body.user.password).toBeUndefined(); // ✅ Password non exposé
+      expect(response.body.user.password).toBeUndefined(); //  Password non exposé
     });
 
     it('should return 401 for unauthenticated request', async () => {

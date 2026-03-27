@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+﻿import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppFactory } from './utils/test-app.factory';
@@ -196,7 +196,7 @@ describe('OrganizationController (e2e)', () => {
 
       expect(response.body.organization.userCount).toBeGreaterThanOrEqual(1);
       response.body.organization.users.forEach((user: any) => {
-        expect(user.password).toBeUndefined(); // ✅ Password non exposé
+        expect(user.password).toBeUndefined(); //  Password non exposé
       });
     });
 
@@ -315,7 +315,7 @@ describe('OrganizationController (e2e)', () => {
       expect(response.body.organization.userCount).toBe(2);
       expect(response.body.organization.users.length).toBe(2);
 
-      // ✅ Vérifier que le password n'est pas exposé
+      //  Vérifier que le password n'est pas exposé
       response.body.organization.users.forEach((user: any) => {
         expect(user.password).toBeUndefined();
         expect(user.id).toBeDefined();

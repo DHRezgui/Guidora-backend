@@ -1,4 +1,4 @@
-
+﻿
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { JwtService } from '@nestjs/jwt';
@@ -280,7 +280,7 @@ describe('AuthService', () => {
 
       const result = await service.refreshToken(mockUserResponse.id);
 
-      // ✅ Vérification critique : 1 heure = 3600 secondes
+      //  Vérification critique : 1 heure = 3600 secondes
       expect(result.expires_in).toBe(3600);
     });
 

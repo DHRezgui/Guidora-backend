@@ -1,4 +1,4 @@
-// src/step/step.service.ts
+﻿// src/step/step.service.ts
 import {
   Injectable,
   NotFoundException,
@@ -22,7 +22,7 @@ export class StepService {
     private dataSource: DataSource,
   ) {}
 
-  // ✅ Créer une étape dans un parcours
+  //  Créer une étape dans un parcours
   async create(
     createStepDto: CreateStepDto,
     tourId: string,
@@ -54,7 +54,7 @@ export class StepService {
     return this.stepRepository.save(step);
   }
 
-  // ✅ Lister toutes les étapes d'un parcours
+  //  Lister toutes les étapes d'un parcours
   async findAllByTour(tourId: string, organizationId: string): Promise<Step[]> {
     // Vérifier que le tour appartient à l'organisation
     const tour = await this.tourRepository.findOne({
@@ -73,7 +73,7 @@ export class StepService {
     });
   }
 
-  // ✅ Trouver une étape par ID
+  //  Trouver une étape par ID
   async findById(id: string, organizationId: string): Promise<Step> {
     const step = await this.stepRepository.findOne({
       where: { id },
@@ -94,7 +94,7 @@ export class StepService {
     return step;
   }
 
-  // ✅ Mettre à jour une étape
+  //  Mettre à jour une étape
   async update(
     id: string,
     updateStepDto: UpdateStepDto,
@@ -108,7 +108,7 @@ export class StepService {
     return this.stepRepository.save(step);
   }
 
-  // ✅ Supprimer une étape
+  //  Supprimer une étape
   async delete(id: string, organizationId: string): Promise<void> {
     const step = await this.findById(id, organizationId);
 
@@ -119,7 +119,7 @@ export class StepService {
     await this.reorderSteps(step.tourId);
   }
 
-  // ✅ Réorganiser les étapes d'un parcours
+  //  Réorganiser les étapes d'un parcours
   async reorderSteps(tourId: string): Promise<Step[]> {
     const steps = await this.stepRepository.find({
       where: { tourId },
@@ -145,7 +145,7 @@ export class StepService {
     });
   }
 
-  // ✅ Réorganiser manuellement les étapes
+  //  Réorganiser manuellement les étapes
   async reorder(
     tourId: string,
     stepIds: string[],
@@ -197,7 +197,7 @@ export class StepService {
     });
   }
 
-  // ✅ Déplacer une étape vers le haut
+  //  Déplacer une étape vers le haut
   async moveUp(id: string, organizationId: string): Promise<Step[]> {
     const step = await this.findById(id, organizationId);
 
@@ -238,7 +238,7 @@ export class StepService {
     return this.findAllByTour(step.tourId, organizationId);
   }
 
-  // ✅ Déplacer une étape vers le bas
+  //  Déplacer une étape vers le bas
   async moveDown(id: string, organizationId: string): Promise<Step[]> {
     const step = await this.findById(id, organizationId);
 
@@ -284,7 +284,7 @@ export class StepService {
     return this.findAllByTour(step.tourId, organizationId);
   }
 
-  // ✅ Dupliquer une étape
+  //  Dupliquer une étape
   async duplicate(id: string, organizationId: string): Promise<Step> {
     const originalStep = await this.findById(id, organizationId);
 
@@ -326,3 +326,4 @@ export class StepService {
     return this.stepRepository.save(duplicatedStep);
   }
 }
+

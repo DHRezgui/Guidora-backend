@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { RabbitMQService } from './../rabbitmq/rabbitmq.service';
 import { TrackEventDto } from './dto/track-event.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -120,7 +120,7 @@ export class AsyncTrackingService implements OnModuleInit {
     }
   }
 
-  // ✅ Sauvegarder les événements échoués
+  //  Sauvegarder les événements échoués
   private async saveFailedEvent(eventData: any, error: Error): Promise<void> {
     try {
       // Créer une table "failed_events" si nécessaire

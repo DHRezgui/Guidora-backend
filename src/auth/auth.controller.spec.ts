@@ -1,4 +1,4 @@
-
+﻿
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -153,7 +153,7 @@ describe('AuthController', () => {
 
       expect(result.access_token).toBeDefined();
       expect(result.token_type).toBe('Bearer');
-      expect(result.expires_in).toBe(3600); // ✅ 1 heure
+      expect(result.expires_in).toBe(3600); //  1 heure
     });
 
     it('should throw UnauthorizedException with wrong password', async () => {

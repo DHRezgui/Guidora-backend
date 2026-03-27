@@ -1,4 +1,4 @@
-// src/step/step.controller.ts
+﻿// src/step/step.controller.ts
 import {
   Controller,
   Get,
@@ -37,7 +37,7 @@ import { ApiAuth } from '../swagger/security-schemas';
 export class StepController {
   constructor(private readonly stepService: StepService) {}
 
-  // ✅ Create a step in a tour (ADMIN only)
+  //  Create a step in a tour (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Post('tour/:tourId')
   @HttpCode(HttpStatus.CREATED)
@@ -102,7 +102,7 @@ export class StepController {
     };
   }
 
-  // ✅ List steps of a tour
+  //  List steps of a tour
   @Get('tour/:tourId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -170,7 +170,7 @@ export class StepController {
     };
   }
 
-  // ✅ Step details
+  //  Step details
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -227,7 +227,7 @@ export class StepController {
     };
   }
 
-  // ✅ Update a step (ADMIN only)
+  //  Update a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id')
   @HttpCode(HttpStatus.OK)
@@ -288,7 +288,7 @@ export class StepController {
     };
   }
 
-  // ✅ Delete a step (ADMIN only)
+  //  Delete a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
@@ -333,7 +333,7 @@ export class StepController {
     };
   }
 
-  // ✅ Reorder steps manually (ADMIN only)
+  //  Reorder steps manually (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put('tour/:tourId/reorder')
   @HttpCode(HttpStatus.OK)
@@ -429,7 +429,7 @@ export class StepController {
     };
   }
 
-  // ✅ Move a step up (ADMIN only)
+  //  Move a step up (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id/move-up')
   @HttpCode(HttpStatus.OK)
@@ -499,7 +499,7 @@ export class StepController {
     };
   }
 
-  // ✅ Move a step down (ADMIN only)
+  //  Move a step down (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Put(':id/move-down')
   @HttpCode(HttpStatus.OK)
@@ -569,7 +569,7 @@ export class StepController {
     };
   }
 
-  // ✅ Duplicate a step (ADMIN only)
+  //  Duplicate a step (ADMIN only)
   @Roles(UserRole.ADMIN)
   @Post(':id/duplicate')
   @HttpCode(HttpStatus.CREATED)
