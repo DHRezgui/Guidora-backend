@@ -40,6 +40,9 @@ PY
 COPY backend/ ./
 COPY ml/ /app/ml/
 
+# Compile NestJS application during image build for faster, deterministic runtime start.
+RUN npm run build
+
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["npm", "run", "start:prod"]

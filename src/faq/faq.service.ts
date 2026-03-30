@@ -11,31 +11,22 @@ export class FaqService {
 	private readonly pythonExecutable: string;
 	private readonly semanticScriptPath: string;
 	private readonly pythonTimeoutMs: number;
-	private readonly strictMinSimilarity: number;
-	private readonly enforceStrictFiltering: boolean;
+	private readonly adaptiveThresholds: number[];
 
 	constructor() {
 		const cwd = process.cwd();
 		this.workspaceRoot = path.basename(cwd).toLowerCase() === 'backend' ? path.resolve(cwd, '..') : cwd;
 		this.pythonTimeoutMs = Number(process.env.FAQ_PYTHON_TIMEOUT_MS ?? 600000);
-		this.strictMinSimilarity = Number(process.env.FAQ_STRICT_MIN_SIMILARITY ?? 0.7);
-		this.enforceStrictFiltering = (process.env.FAQ_ENFORCE_STRICT ?? 'true').toLowerCase() === 'true';
+		this.adaptiveThresholds = this.parseAdaptiveThresholds(
+			process.env.FAQ_ADAPTIVE_THRESHOLDS ?? '0.7,0.65,0.6',
+		);
 		this.pythonExecutable = this.resolvePythonExecutable();
 		this.semanticScriptPath = this.resolveSemanticScriptPath();
 	}
 
 	async semanticSearch(request: SemanticSearchRequestDto): Promise<SemanticSearchResponseDto> {
 		const topK = request.topK ?? 5;
-		const requestedMinSimilarity = request.minSimilarity ?? this.strictMinSimilarity;
-		const minSimilarity = this.enforceStrictFiltering
-			? Math.max(requestedMinSimilarity, this.strictMinSimilarity)
-			: requestedMinSimilarity;
-
-		if (requestedMinSimilarity !== minSimilarity) {
-			this.logger.log(
-				`Strict FAQ filter applied: requested minSimilarity=${requestedMinSimilarity}, effective=${minSimilarity}`,
-			);
-		}
+		const requestedMinSimilarity = request.minSimilarity;
 
 		if (!fs.existsSync(this.semanticScriptPath)) {
 			throw new InternalServerErrorException(
@@ -43,7 +34,72 @@ export class FaqService {
 			);
 		}
 
-		return this.executeSemanticSearch(request.question, topK, minSimilarity);
+		const rawResponse = await this.executeSemanticSearch(
+			request.question,
+			Math.max(1, topK),
+			-1,
+		);
+
+		if (!rawResponse.results?.length) {
+			return {
+				...rawResponse,
+				strategyStep: 'no_results',
+			};
+		}
+
+		const thresholds = this.getEffectiveThresholds(requestedMinSimilarity);
+
+		for (const threshold of thresholds) {
+			const filtered = rawResponse.results.filter((item) => item.score >= threshold).slice(0, topK);
+			if (filtered.length > 0) {
+				const strategyStep = `threshold_${threshold}`;
+				this.logger.log(
+					`FAQ adaptive strategy matched ${strategyStep} with ${filtered.length} result(s)`,
+				);
+				return {
+					success: rawResponse.success,
+					query: rawResponse.query,
+					total: filtered.length,
+					strategyStep,
+					results: filtered,
+				};
+			}
+		}
+
+		this.logger.log('FAQ adaptive strategy fallback: returning top-1 despite low score');
+		const fallbackResults = rawResponse.results.slice(0, 1);
+		return {
+			success: rawResponse.success,
+			query: rawResponse.query,
+			total: fallbackResults.length,
+			strategyStep: 'fallback_top1',
+			results: fallbackResults,
+		};
+	}
+
+	private parseAdaptiveThresholds(value: string): number[] {
+		const parsed = value
+			.split(',')
+			.map((token) => Number(token.trim()))
+			.filter((num) => Number.isFinite(num))
+			.filter((num) => num >= 0 && num <= 1)
+			.sort((a, b) => b - a);
+
+		if (parsed.length > 0) {
+			return parsed;
+		}
+
+		return [0.7, 0.65, 0.6];
+	}
+
+	private getEffectiveThresholds(requestedMinSimilarity?: number): number[] {
+		if (requestedMinSimilarity === undefined || Number.isNaN(requestedMinSimilarity)) {
+			return this.adaptiveThresholds;
+		}
+
+		const clampedRequested = Math.max(0, Math.min(1, requestedMinSimilarity));
+		const merged = [clampedRequested, ...this.adaptiveThresholds];
+		return [...new Set(merged)].sort((a, b) => b - a);
 	}
 
 	private resolvePythonExecutable(): string {

@@ -26,7 +26,7 @@ export class SemanticSearchRequestDto {
 
   @ApiPropertyOptional({
     description:
-      'Minimum cosine similarity threshold. In strict mode, backend enforces a floor (default 0.70) to keep only very relevant matches.',
+      'Optional initial threshold for adaptive filtering. Backend tries thresholds in sequence (default: 0.70 -> 0.65 -> 0.60), then falls back to top-1 if still empty.',
     minimum: 0,
     maximum: 1,
     default: 0.7,
@@ -68,6 +68,13 @@ export class SemanticSearchResponseDto {
 
   @ApiProperty({ example: 3 })
   total: number;
+
+  @ApiPropertyOptional({
+    example: 'threshold_0.7',
+    description:
+      'Adaptive strategy step used for this response: threshold_<value> or fallback_top1',
+  })
+  strategyStep?: string;
 
   @ApiProperty({ type: [SemanticSearchResultDto] })
   results: SemanticSearchResultDto[];
