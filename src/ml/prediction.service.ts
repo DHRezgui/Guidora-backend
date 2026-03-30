@@ -31,9 +31,14 @@ export class PredictionService implements OnModuleInit {
     this.featurePath = path.join(workspaceRoot, 'ml', 'models', 'feature_names.json');
     this.pythonScriptPath = path.join(workspaceRoot, 'ml', 'predict.py');
 
-    this.pythonExecutable = process.platform === 'win32'
-      ? path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe')
-      : path.join(workspaceRoot, '.venv', 'bin', 'python');
+    const envPython = process.env.PYTHON_EXECUTABLE?.trim();
+    if (envPython) {
+      this.pythonExecutable = envPython;
+    } else {
+      const windowsVenvPython = path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe');
+      const unixVenvPython = path.join(workspaceRoot, '.venv', 'bin', 'python');
+      this.pythonExecutable = process.platform === 'win32' ? windowsVenvPython : unixVenvPython;
+    }
   }
 
   async onModuleInit(): Promise<void> {
@@ -262,6 +267,10 @@ export class PredictionService implements OnModuleInit {
 
       // Wait for process to complete
       return new Promise((resolve, reject) => {
+        child.on('error', (error) => {
+          reject(new Error(`Failed to start python process (${this.pythonExecutable}): ${error.message}`));
+        });
+
         child.on('close', (code) => {
           try {
             if (stderr) {

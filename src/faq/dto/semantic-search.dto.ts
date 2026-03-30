@@ -25,10 +25,11 @@ export class SemanticSearchRequestDto {
   topK?: number;
 
   @ApiPropertyOptional({
-    description: 'Minimum cosine similarity threshold',
+    description:
+      'Minimum cosine similarity threshold. In strict mode, backend enforces a floor (default 0.70) to keep only very relevant matches.',
     minimum: 0,
     maximum: 1,
-    default: 0.2,
+    default: 0.7,
   })
   @IsOptional()
   @Type(() => Number)
