@@ -8,6 +8,7 @@ import { OrganizationService } from '../organization/organization.service';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { PositionType, ActionType } from '../step/enums/tour.enums';
+import { ContextualScenario, PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 
 describe('GuidedTourService', () => {
   let service: GuidedTourService;
@@ -479,6 +480,141 @@ describe('GuidedTourService', () => {
       const result = await service.findActiveToursForUrl('/nonexistent', orgId);
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('publishContextualDrafts', () => {
+    it('should reject drafts below scenario thresholds', async () => {
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.MEDIUM,
+        drafts: [
+          {
+            name: 'Low quality draft',
+            targetUrl: '/dashboard/sdk-tests/medium',
+            intent: 'primary-action',
+            confidence: 40,
+            score: 50,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-low' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content 1',
+                targetSelector: 'h1:nth-of-type(1)',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content 2',
+                targetSelector: '',
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+
+      expect(result.rejected).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].reasons.length).toBeGreaterThan(0);
+    });
+
+    it('should create and auto-activate a high-quality draft', async () => {
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.MEDIUM,
+        drafts: [
+          {
+            name: 'KYC validation',
+            targetUrl: '/dashboard/sdk-tests/medium',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v2', flowSignature: 'sig-kyc-1' },
+            diagnostics: { rejectedNoise: 2 },
+            steps: [
+              {
+                title: 'Open identity form',
+                content: 'Use the form to start',
+                targetSelector: '[data-tour-id="tour-medium-input-full-name"]',
+              },
+              {
+                title: 'Validate',
+                content: 'Click validate to submit',
+                targetSelector: '[data-tour-id="tour-medium-validate-identity"] button',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([]);
+      const createSpy = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({ ...mockTourEntity, id: 'new-contextual-tour' } as GuidedTour);
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+
+      expect(result.created).toBe(1);
+      expect(result.activated).toBe(1);
+      expect(result.rejected).toBe(0);
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should skip duplicated signature for same route and intent', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          contextualEngine: {
+            intent: 'discovery',
+            flowSignature: 'sig-duplicate',
+            version: 1,
+          },
+        },
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Duplicate draft',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            intent: 'discovery',
+            confidence: 82,
+            score: 87,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-duplicate' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content 1',
+                targetSelector: '[data-tour-id="tour-simple-title"]',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content 2',
+                targetSelector: '[data-tour-id="tour-simple-cta"] button',
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+
+      expect(result.skipped).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].reasons).toContain('duplicate_signature');
     });
   });
 });

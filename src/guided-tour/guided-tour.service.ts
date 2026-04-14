@@ -6,9 +6,56 @@ import { Step } from '../step/entities/step.entity';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { OrganizationService } from '../organization/organization.service';
+import {
+  ContextualDraftStepDto,
+  ContextualScenario,
+  ContextualSuggestedDraftDto,
+  PublishContextualDraftsDto,
+} from './dto/publish-contextual-drafts.dto';
+import { ActionType, PositionType } from '../step/enums/tour.enums';
+
+type ScenarioThreshold = {
+  minConfidence: number;
+  minScore: number;
+  minStableSteps: number;
+  activationConfidence: number;
+};
+
+type ContextualEngineMeta = {
+  source?: string;
+  status?: 'pending_review' | 'active';
+  scenario?: ContextualScenario;
+  intent?: string;
+  confidence?: number;
+  score?: number;
+  flowVersion?: string;
+  flowSignature?: string;
+  version?: number;
+};
 
 @Injectable()
 export class GuidedTourService {
+  private readonly scenarioThresholds: Record<ContextualScenario, ScenarioThreshold> = {
+    [ContextualScenario.SIMPLE]: {
+      minConfidence: 45,
+      minScore: 50,
+      minStableSteps: 1,
+      activationConfidence: 70,
+    },
+    [ContextualScenario.MEDIUM]: {
+      minConfidence: 62,
+      minScore: 80,
+      minStableSteps: 2,
+      activationConfidence: 70,
+    },
+    [ContextualScenario.DYNAMIC]: {
+      minConfidence: 66,
+      minScore: 85,
+      minStableSteps: 1,
+      activationConfidence: 72,
+    },
+  };
+
   constructor(
     @InjectRepository(GuidedTour)
     private tourRepository: Repository<GuidedTour>,
@@ -16,6 +63,324 @@ export class GuidedTourService {
     private stepRepository: Repository<Step>,
     private organizationService: OrganizationService,
   ) {}
+
+  async publishContextualDrafts(
+    dto: PublishContextualDraftsDto,
+    organizationId: string,
+    createdBy?: string,
+  ): Promise<{
+    processed: number;
+    created: number;
+    activated: number;
+    rejected: number;
+    skipped: number;
+    details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }>;
+  }> {
+    await this.organizationService.findById(organizationId);
+
+    const threshold = this.scenarioThresholds[dto.scenario];
+    const autoActivate = dto.autoActivate ?? true;
+    const targetUrls = [...new Set(dto.drafts.map((draft) => draft.targetUrl).filter(Boolean))];
+
+    const existingTours = targetUrls.length
+      ? await this.tourRepository.find({
+          where: { organizationId, targetUrl: In(targetUrls) },
+          relations: ['steps'],
+        })
+      : [];
+
+    const dedupeSet = new Set<string>();
+    for (const tour of existingTours) {
+      const engineMeta = this.getContextualMeta(tour);
+      if (!engineMeta?.intent || !engineMeta?.flowSignature) {
+        continue;
+      }
+      dedupeSet.add(this.buildDedupeKey(tour.targetUrl, engineMeta.intent, engineMeta.flowSignature));
+    }
+
+    const details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }> = [];
+    let created = 0;
+    let activated = 0;
+    let rejected = 0;
+    let skipped = 0;
+
+    for (const draft of dto.drafts) {
+      const reasons: string[] = [];
+      const intent = draft.intent ?? 'discovery';
+      const flowSignature = draft.flowVersioning?.flowSignature;
+
+      if (!flowSignature) {
+        reasons.push('missing_flow_signature');
+      }
+
+      const quality = this.evaluateDraftQuality(draft, dto.scenario, threshold);
+      reasons.push(...quality.reasons);
+
+      if (reasons.length > 0) {
+        rejected += 1;
+        details.push({ draftName: draft.name, outcome: 'rejected', reasons });
+        continue;
+      }
+
+      const dedupeKey = this.buildDedupeKey(draft.targetUrl, intent, flowSignature);
+      if (dedupeSet.has(dedupeKey)) {
+        skipped += 1;
+        details.push({ draftName: draft.name, outcome: 'skipped', reasons: ['duplicate_signature'] });
+        continue;
+      }
+
+      const version = this.computeNextVersion(existingTours, draft.targetUrl, intent);
+      const shouldActivate =
+        autoActivate &&
+        draft.confidence >= threshold.activationConfidence &&
+        draft.score >= threshold.minScore &&
+        quality.primaryStable &&
+        !quality.hasCriticalConflict &&
+        quality.intentTargetCoherent;
+
+      const tour = await this.create(
+        {
+          name: draft.name,
+          description: draft.description,
+          targetUrl: draft.targetUrl,
+          isActive: shouldActivate,
+          priority: Math.max(0, Math.round(draft.score)),
+          triggerConditions: {
+            source: 'contextual-engine',
+            contextualEngine: {
+              source: 'contextual-engine',
+              status: shouldActivate ? 'active' : 'pending_review',
+              scenario: dto.scenario,
+              intent,
+              confidence: draft.confidence,
+              score: draft.score,
+              flowVersion: draft.flowVersioning.flowVersion,
+              flowSignature,
+              version,
+              explainability: draft.explainability ?? {},
+              diagnostics: draft.diagnostics ?? {},
+              metadata: draft.metadata ?? {},
+              persistedAt: new Date().toISOString(),
+            },
+          },
+          steps: draft.steps.map((step) => ({
+            title: step.title,
+            content: step.content,
+            targetSelector: step.targetSelector,
+            position: this.normalizePosition(step.position),
+            action: this.normalizeAction(step.action),
+            skipAllowed: step.skipAllowed ?? true,
+            highlightElement: step.highlightElement ?? true,
+          })),
+        },
+        organizationId,
+        createdBy,
+      );
+
+      created += 1;
+      if (shouldActivate) {
+        activated += 1;
+      }
+
+      details.push({
+        draftName: draft.name,
+        outcome: shouldActivate ? 'activated' : 'created',
+        reasons: [shouldActivate ? 'auto_activated' : 'saved_pending_review'],
+        tourId: tour.id,
+      });
+
+      dedupeSet.add(dedupeKey);
+      existingTours.push(tour);
+    }
+
+    return {
+      processed: dto.drafts.length,
+      created,
+      activated,
+      rejected,
+      skipped,
+      details,
+    };
+  }
+
+  private evaluateDraftQuality(
+    draft: ContextualSuggestedDraftDto,
+    scenario: ContextualScenario,
+    threshold: ScenarioThreshold,
+  ): {
+    reasons: string[];
+    hasCriticalConflict: boolean;
+    primaryStable: boolean;
+    intentTargetCoherent: boolean;
+  } {
+    const reasons: string[] = [];
+    const steps = draft.steps ?? [];
+
+    if (steps.length < 1) {
+      reasons.push('no_steps_provided');
+    }
+
+    if (draft.confidence < threshold.minConfidence) {
+      reasons.push('confidence_below_threshold');
+    }
+
+    if (draft.score < threshold.minScore) {
+      reasons.push('score_below_threshold');
+    }
+
+    const hasMissingSelector = steps.some((step) => !step.targetSelector || !step.targetSelector.trim());
+    if (hasMissingSelector) {
+      reasons.push('missing_target_selector');
+    }
+
+    const primaryStep = this.pickPrimaryStep(steps);
+    const primarySelector = primaryStep?.targetSelector;
+    const primaryStable = this.isStableSelector(primarySelector);
+    const primaryFragile = this.isFragileSelector(primarySelector);
+
+    if (primaryFragile && !primaryStable) {
+      reasons.push('primary_selector_fragile_only');
+    }
+
+    const isPrimaryIntent = (draft.intent ?? '').toLowerCase() === 'primary-action';
+    const intentTargetCoherent = !isPrimaryIntent || this.isActionableSelector(primarySelector);
+    if (!intentTargetCoherent) {
+      reasons.push('primary_intent_not_actionable');
+    }
+
+    const stableSteps = steps.filter((step) => this.isStableSelector(step.targetSelector)).length;
+    if (stableSteps < threshold.minStableSteps) {
+      reasons.push('stable_selector_coverage_too_low');
+    }
+
+    if (scenario === ContextualScenario.DYNAMIC) {
+      const rejectedNoise = this.extractRejectedNoiseMetric(draft);
+      if (rejectedNoise !== undefined && rejectedNoise <= 0) {
+        reasons.push('dynamic_noise_robustness_failed');
+      }
+      if (!primaryStable) {
+        reasons.push('dynamic_primary_not_stable');
+      }
+    }
+
+    const hasCriticalConflict = this.hasCriticalConflict(draft);
+    if (hasCriticalConflict) {
+      reasons.push('critical_conflict_unresolved');
+    }
+
+    return {
+      reasons,
+      hasCriticalConflict,
+      primaryStable,
+      intentTargetCoherent,
+    };
+  }
+
+  private pickPrimaryStep(steps: ContextualDraftStepDto[]): ContextualDraftStepDto | undefined {
+    return (
+      steps.find((step) => step.isPrimary) ??
+      steps.find((step) => (step.intent ?? '').toLowerCase() === 'primary-action') ??
+      steps[0]
+    );
+  }
+
+  private isStableSelector(selector?: string): boolean {
+    if (!selector) {
+      return false;
+    }
+    return /data-tour-id|data-testid/i.test(selector);
+  }
+
+  private isFragileSelector(selector?: string): boolean {
+    if (!selector) {
+      return false;
+    }
+    return /:nth-of-type\(|:nth-child\(/i.test(selector);
+  }
+
+  private isActionableSelector(selector?: string): boolean {
+    if (!selector) {
+      return false;
+    }
+    return /(button|\[role=["']button["']\]|a\[|input\[type=["']submit["']\]|input\[type=["']button["']\])/i.test(
+      selector,
+    );
+  }
+
+  private extractRejectedNoiseMetric(draft: ContextualSuggestedDraftDto): number | undefined {
+    const candidates: unknown[] = [
+      draft.diagnostics?.rejectedNoise,
+      draft.metadata?.rejectedNoise,
+      draft.explainability?.rejectedNoise,
+      (draft.diagnostics?.generationMetrics as Record<string, unknown> | undefined)?.rejectedNoise,
+      (draft.metadata?.generationMetrics as Record<string, unknown> | undefined)?.rejectedNoise,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  }
+
+  private hasCriticalConflict(draft: ContextualSuggestedDraftDto): boolean {
+    const candidates: unknown[] = [
+      draft.diagnostics?.hasCriticalConflict,
+      draft.metadata?.hasCriticalConflict,
+      draft.explainability?.hasCriticalConflict,
+      (draft.diagnostics?.conflicts as Record<string, unknown> | undefined)?.critical,
+      (draft.metadata?.conflicts as Record<string, unknown> | undefined)?.critical,
+      (draft.explainability?.conflicts as Record<string, unknown> | undefined)?.critical,
+    ];
+
+    return candidates.some((value) => value === true || (typeof value === 'number' && value > 0));
+  }
+
+  private normalizePosition(position?: PositionType): PositionType {
+    if (!position) {
+      return PositionType.BOTTOM;
+    }
+    return PositionType[position] ? position : PositionType.BOTTOM;
+  }
+
+  private normalizeAction(action?: ActionType): ActionType {
+    if (!action) {
+      return ActionType.NEXT;
+    }
+    return ActionType[action] ? action : ActionType.NEXT;
+  }
+
+  private computeNextVersion(existingTours: GuidedTour[], targetUrl: string, intent: string): number {
+    let maxVersion = 0;
+    for (const tour of existingTours) {
+      if (tour.targetUrl !== targetUrl) {
+        continue;
+      }
+      const meta = this.getContextualMeta(tour);
+      if (!meta || (meta.intent ?? 'discovery') !== intent) {
+        continue;
+      }
+      if (typeof meta.version === 'number' && meta.version > maxVersion) {
+        maxVersion = meta.version;
+      }
+    }
+    return maxVersion + 1;
+  }
+
+  private buildDedupeKey(targetUrl: string, intent: string, flowSignature: string): string {
+    return `${targetUrl}::${intent}::${flowSignature}`;
+  }
+
+  private getContextualMeta(tour: GuidedTour): ContextualEngineMeta | undefined {
+    const triggerConditions = tour.triggerConditions as Record<string, unknown> | undefined;
+    const contextualEngine = triggerConditions?.contextualEngine;
+    if (!contextualEngine || typeof contextualEngine !== 'object') {
+      return undefined;
+    }
+    return contextualEngine as ContextualEngineMeta;
+  }
 
   // Créer un parcours avec ses étapes
   async create(createTourDto: CreateGuidedTourDto, organizationId: string, createdBy?: string): Promise<GuidedTour> {

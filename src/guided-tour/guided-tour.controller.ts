@@ -10,6 +10,7 @@ import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { GuidedTour } from './entities/guided-tour.entity';
 import { ApiAuth } from '../swagger/security-schemas';
+import { PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 
 @ApiTags('Guided Tour')
 @Controller('tours')
@@ -95,6 +96,35 @@ export class GuidedTourController {
       success: true,
       message: 'Tour created successfully',
       tour,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('contextual/publish')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Publish contextual drafts',
+    description: 'Apply quality gates, deduplication and activation policy to SDK contextual drafts.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Contextual drafts processed',
+  })
+  async publishContextualDrafts(
+    @Body() publishDto: PublishContextualDraftsDto,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const report = await this.tourService.publishContextualDrafts(
+      publishDto,
+      organizationId,
+      user.id,
+    );
+
+    return {
+      success: true,
+      message: 'Contextual drafts processed successfully',
+      report,
     };
   }
 

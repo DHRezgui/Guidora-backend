@@ -5,6 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { PositionType, ActionType } from '../step/enums/tour.enums';
+import { ContextualScenario, PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 
 describe('GuidedTourController', () => {
   let controller: GuidedTourController;
@@ -12,6 +13,7 @@ describe('GuidedTourController', () => {
 
   const mockGuidedTourService = {
     create: jest.fn(),
+    publishContextualDrafts: jest.fn(),
     findAllByOrganization: jest.fn(),
     findActiveToursForUrl: jest.fn(),
     findById: jest.fn(),
@@ -218,6 +220,58 @@ describe('GuidedTourController', () => {
         count: 0,
         tours: [],
       });
+    });
+  });
+
+  describe('publishContextualDrafts', () => {
+    it('should publish contextual drafts and return processing report', async () => {
+      const payload: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Simple discovery',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            confidence: 80,
+            score: 82,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-simple-1' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content',
+                targetSelector: '[data-tour-id="tour-simple-title"]',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content',
+                targetSelector: '[data-tour-id="tour-simple-cta"]',
+              },
+            ],
+          },
+        ],
+      };
+
+      const report = {
+        processed: 1,
+        created: 1,
+        activated: 1,
+        rejected: 0,
+        skipped: 0,
+        details: [{ draftName: 'Simple discovery', outcome: 'activated', reasons: ['auto_activated'] }],
+      };
+      mockGuidedTourService.publishContextualDrafts.mockResolvedValue(report);
+
+      const result = await controller.publishContextualDrafts(payload, mockCurrentUser);
+
+      expect(result).toEqual({
+        success: true,
+        message: 'Contextual drafts processed successfully',
+        report,
+      });
+      expect(service.publishContextualDrafts).toHaveBeenCalledWith(
+        payload,
+        mockCurrentUser.organizationId,
+        mockCurrentUser.id,
+      );
     });
   });
 
