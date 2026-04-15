@@ -163,6 +163,7 @@ export class GuidedTourService {
               persistedAt: new Date().toISOString(),
             },
           },
+          simulationContext: this.extractSimulationContext(draft.metadata),
           steps: draft.steps.map((step) => ({
             title: step.title,
             content: step.content,
@@ -336,6 +337,15 @@ export class GuidedTourService {
     ];
 
     return candidates.some((value) => value === true || (typeof value === 'number' && value > 0));
+  }
+
+  private extractSimulationContext(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
+    const previewContext = metadata?.previewContext;
+    if (!previewContext || typeof previewContext !== 'object') {
+      return undefined;
+    }
+
+    return previewContext as Record<string, unknown>;
   }
 
   private normalizePosition(position?: PositionType): PositionType {

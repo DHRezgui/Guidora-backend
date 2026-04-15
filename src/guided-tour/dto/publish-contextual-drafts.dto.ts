@@ -130,7 +130,7 @@ export class ContextualSuggestedDraftDto {
 
   @IsObject()
   @IsOptional()
-  @ApiProperty({ required: false, description: 'Raw metadata payload from SDK' })
+  @ApiProperty({ required: false, description: 'Raw metadata payload from SDK (includes previewContext for simulator reconstruction)' })
   metadata?: Record<string, unknown>;
 }
 

@@ -64,6 +64,19 @@ export class CreateGuidedTourDto {
   })
   triggerConditions?: Record<string, any>;
 
+  @IsObject({ message: 'Le contexte de simulation doit être un objet JSON' })
+  @IsOptional()
+  @ApiProperty({
+    description: 'Optional structured page context used by simulator preview reconstruction',
+    required: false,
+    example: {
+      pageUrl: 'https://app.example.com/dashboard/users',
+      pathname: '/dashboard/users',
+      pageTitle: 'Users Dashboard',
+    },
+  })
+  simulationContext?: Record<string, any>;
+
   @IsArray({ message: 'Les étapes doivent être un tableau' })
   @ValidateNested({ each: true })
   @Type(() => CreateStepDto)

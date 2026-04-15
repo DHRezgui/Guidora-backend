@@ -33,6 +33,9 @@ export class GuidedTour {
   @Column({ type: 'jsonb', default: {}, name: 'trigger_conditions' })
   triggerConditions: Record<string, any>;
 
+  @Column({ type: 'jsonb', nullable: true, name: 'simulation_context' })
+  simulationContext?: Record<string, any>;
+
   @Column({ type: 'uuid', nullable: true, name: 'created_by' })
   createdBy?: string;
 
