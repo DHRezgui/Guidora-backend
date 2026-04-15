@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: .docker/develop/Dockerfile
+    env_file: .docker/develop/.env
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run start:dev
+    ports:
+      - '3002:3000'
+    networks:
+      - onboarding-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: onboarding
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+    ports:
+      - '5542:5432'
+    volumes:
+      - onboarding_backend_pg_dev:/var/lib/postgresql/data
+    networks:
+      - onboarding-dev
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U admin -d onboarding']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  onboarding_backend_pg_dev:
+networks:
+  onboarding-dev:
+    driver: bridge

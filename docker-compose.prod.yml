@@ -1,0 +1,50 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: .docker/prod/Dockerfile
+    env_file: .docker/prod/.env
+    volumes:
+      - ../ml:/app/ml:ro
+    ports:
+      - '3002:3000'
+    networks:
+      - onboarding-prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS http://127.0.0.1:3000/api/v1/docs >/dev/null || exit 1',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: onboarding
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+    ports:
+      - '5542:5432'
+    volumes:
+      - onboarding_backend_pg_prod:/var/lib/postgresql/data
+    networks:
+      - onboarding-prod
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U admin -d onboarding']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+volumes:
+  onboarding_backend_pg_prod:
+networks:
+  onboarding-prod:
+    driver: bridge

@@ -1,4 +1,4 @@
-﻿import { NestFactory } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -14,6 +14,7 @@ async function bootstrap() {
     origin: [
       'http://localhost:3001',      // Dashboard en local (dev)
       'http://localhost:3003',      // Dashboard via Docker
+      'http://localhost:3021',      // Dashboard via docker-compose.dev (host)
       'http://dashboard:3000',      // Dashboard dans Docker (interne)
       'http://localhost:3000',      // Pour les tests
     ],

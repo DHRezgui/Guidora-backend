@@ -1,0 +1,12 @@
+PORT=3000
+NODE_ENV=development
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=admin
+DB_PASSWORD=password123
+DB_NAME=onboarding
+REDIS_ENABLED=false
+REDIS_HOST=redis
+REDIS_PORT=6379
+RABBITMQ_ENABLED=false
+FRONTEND_URL=http://localhost:3021
