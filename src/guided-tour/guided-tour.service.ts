@@ -405,6 +405,7 @@ export class GuidedTourService {
       organizationId,
       createdBy,
       triggerConditions: createTourDto.triggerConditions || {},
+      simulationContext: createTourDto.simulationContext,
     });
 
     // Sauvegarder le tour pour obtenir l'ID
@@ -474,6 +475,9 @@ export class GuidedTourService {
     if (updateTourDto.priority !== undefined) tour.priority = updateTourDto.priority;
     if (updateTourDto.triggerConditions !== undefined) {
       tour.triggerConditions = { ...tour.triggerConditions, ...updateTourDto.triggerConditions };
+    }
+    if (updateTourDto.simulationContext !== undefined) {
+      tour.simulationContext = updateTourDto.simulationContext;
     }
 
     // Sauvegarder le tour mis à jour
