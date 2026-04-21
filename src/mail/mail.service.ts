@@ -9,17 +9,34 @@ export class MailService {
   private readonly fromEmail: string;
   private readonly frontendUrl: string;
 
+  private parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+    if (value === undefined) return defaultValue;
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return defaultValue;
+  }
+
   constructor(private readonly configService: ConfigService) {
     this.fromEmail = this.configService.get<string>('MAIL_FROM') || 'noreply@trustdev.com';
     this.frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
 
+    const mailSecure = this.parseBoolean(this.configService.get<string>('MAIL_SECURE'), false);
+    const mailTlsRejectUnauthorized = this.parseBoolean(
+      this.configService.get<string>('MAIL_TLS_REJECT_UNAUTHORIZED'),
+      true,
+    );
+
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('MAIL_HOST') || 'smtp.gmail.com',
       port: parseInt(this.configService.get<string>('MAIL_PORT') || '587', 10),
-      secure: false,
+      secure: mailSecure,
       auth: {
         user: this.configService.get<string>('MAIL_USER'),
         pass: this.configService.get<string>('MAIL_PASSWORD'),
+      },
+      tls: {
+        rejectUnauthorized: mailTlsRejectUnauthorized,
       },
     });
   }
