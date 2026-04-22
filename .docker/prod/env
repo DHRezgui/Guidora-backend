@@ -9,5 +9,5 @@ REDIS_ENABLED=true
 REDIS_HOST=redis
 REDIS_PORT=6379
 FRONTEND_URL=https://dashboard.example.com
-PYTHON_EXECUTABLE=/usr/bin/python3
+PYTHON_EXECUTABLE=python3
 SEMANTIC_SCRIPT_PATH=/app/ml/rag/semantic_search.py

@@ -108,16 +108,6 @@ export class FaqService {
 			return envPython.trim();
 		}
 
-		const windowsVenvPython = path.join(this.workspaceRoot, '.venv', 'Scripts', 'python.exe');
-		if (process.platform === 'win32' && fs.existsSync(windowsVenvPython)) {
-			return windowsVenvPython;
-		}
-
-		const unixVenvPython = path.join(this.workspaceRoot, '.venv', 'bin', 'python');
-		if (process.platform !== 'win32' && fs.existsSync(unixVenvPython)) {
-			return unixVenvPython;
-		}
-
 		if (process.platform !== 'win32') {
 			return 'python3';
 		}

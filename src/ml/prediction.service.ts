@@ -17,7 +17,7 @@ export class PredictionService implements OnModuleInit {
   private pythonScriptPath: string;
   private pythonExecutable: string;
   private modelLoaded = false;
-  private modelVersion: string;
+  private modelVersion = '1.0';
   private featureNames: string[] = [];
 
   constructor() {
@@ -35,9 +35,7 @@ export class PredictionService implements OnModuleInit {
     if (envPython) {
       this.pythonExecutable = envPython;
     } else {
-      const windowsVenvPython = path.join(workspaceRoot, '.venv', 'Scripts', 'python.exe');
-      const unixVenvPython = path.join(workspaceRoot, '.venv', 'bin', 'python');
-      this.pythonExecutable = process.platform === 'win32' ? windowsVenvPython : unixVenvPython;
+      this.pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
     }
   }
 
@@ -60,7 +58,7 @@ export class PredictionService implements OnModuleInit {
       }
     } catch (error) {
       this.modelLoaded = false;
-      this.logger.error(`Failed to initialize prediction service: ${error.message}`);
+      this.logger.error(`Failed to initialize prediction service: ${this.getErrorMessage(error)}`);
       // Don't fail module init - just log warning
     }
   }
@@ -95,7 +93,7 @@ export class PredictionService implements OnModuleInit {
       this.featureNames = Array.isArray(data) ? data : data.features || [];
       this.logger.debug(`Loaded ${this.featureNames.length} feature names`);
     } catch (error) {
-      this.logger.warn(`Could not load feature names: ${error.message}`);
+      this.logger.warn(`Could not load feature names: ${this.getErrorMessage(error)}`);
       // Set defaults
       this.featureNames = [
         'timeOnPage',
@@ -169,11 +167,12 @@ export class PredictionService implements OnModuleInit {
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      this.logger.error(`Prediction error: ${error.message}`);
+      const errorMessage = this.getErrorMessage(error);
+      this.logger.error(`Prediction error: ${errorMessage}`);
 
       return {
         success: false,
-        error: error.message || 'Prediction failed',
+        error: errorMessage || 'Prediction failed',
         timestamp: new Date().toISOString(),
         metadata: {
           modelVersion: this.modelVersion || '1.0',
@@ -337,5 +336,12 @@ export class PredictionService implements OnModuleInit {
     } catch {
       return false;
     }
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
   }
 }
