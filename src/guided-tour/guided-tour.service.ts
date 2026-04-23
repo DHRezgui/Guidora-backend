@@ -206,6 +206,7 @@ export class GuidedTourService {
             title: step.title,
             content: step.content,
             targetSelector: step.targetSelector,
+            stepTargetUrl: step.stepTargetUrl,
             position: this.normalizePosition(step.position),
             action: this.normalizeAction(step.action),
             skipAllowed: step.skipAllowed ?? true,

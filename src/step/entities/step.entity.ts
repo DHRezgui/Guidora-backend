@@ -26,6 +26,9 @@ export class Step {
   @Column({ type: 'varchar', length: 500, nullable: true, name: 'target_selector' })
   targetSelector?: string;
 
+  @Column({ type: 'varchar', length: 500, nullable: true, name: 'step_target_url' })
+  stepTargetUrl?: string;
+
   @Column({
     type: 'enum',
     name: 'position',

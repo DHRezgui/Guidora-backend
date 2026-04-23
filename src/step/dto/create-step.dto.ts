@@ -47,6 +47,15 @@ export class CreateStepDto {
   })
   targetSelector?: string;
 
+  @IsString()
+  @IsOptional()
+  @ApiProperty({
+    description: 'Optional route/page for this step when tour spans multiple pages',
+    example: '/dashboard/billing',
+    required: false,
+  })
+  stepTargetUrl?: string;
+
   @IsEnum(PositionType, { message: 'La position doit être TOP, BOTTOM, LEFT, RIGHT, CENTER, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT ou BOTTOM_RIGHT' })
   @IsOptional()
   @ApiProperty({ 

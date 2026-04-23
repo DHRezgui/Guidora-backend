@@ -48,6 +48,11 @@ export class ContextualDraftStepDto {
   @ApiProperty({ example: '[data-tour-id="tour-medium-validate-identity"]', required: false })
   targetSelector?: string;
 
+  @IsString()
+  @IsOptional()
+  @ApiProperty({ example: '/dashboard/billing', required: false })
+  stepTargetUrl?: string;
+
   @IsEnum(PositionType)
   @IsOptional()
   @ApiProperty({ enum: PositionType, required: false })
