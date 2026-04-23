@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, IsNotEmpty, IsOptional, IsEnum, IsBoolean, IsNumber, Min } from 'class-validator';
-import { PositionType, ActionType } from '../enums/tour.enums';
+import { PositionType, ActionType, StepType } from '../enums/tour.enums';
 
 
 export class CreateStepDto {
@@ -90,4 +90,16 @@ export class CreateStepDto {
     default: true,
   })
   highlightElement?: boolean;
+
+  @IsEnum(StepType, { message: 'Le type doit être tooltip, highlight, modal, form, tutorial ou checklist' })
+  @IsOptional()
+  @ApiProperty({
+    description: 'The display type of the step in the UI',
+    enum: StepType,
+    enumName: 'StepType',
+    example: StepType.HIGHLIGHT,
+    required: false,
+    default: StepType.HIGHLIGHT,
+  })
+  stepType?: StepType;
 }

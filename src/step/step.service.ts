@@ -299,6 +299,7 @@ export class StepService {
       action: originalStep.action,
       skipAllowed: originalStep.skipAllowed,
       highlightElement: originalStep.highlightElement,
+      stepType: originalStep.stepType,
     });
 
     // Décaler toutes les étapes suivantes (via raw SQL pour éviter le conflit UNIQUE)

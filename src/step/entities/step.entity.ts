@@ -1,6 +1,6 @@
 import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, CreateDateColumn, UpdateDateColumn, JoinColumn } from 'typeorm';
 import { GuidedTour } from '../../guided-tour/entities/guided-tour.entity';
-import { PositionType, ActionType } from '../enums/tour.enums';
+import { PositionType, ActionType, StepType } from '../enums/tour.enums';
 
 @Entity('steps')
 export class Step {
@@ -51,6 +51,16 @@ export class Step {
 
   @Column({ type: 'boolean', default: true, name: 'highlight_element' })
   highlightElement: boolean;
+
+  @Column({
+    type: 'enum',
+    name: 'step_type',
+    enumName: 'step_type',
+    enum: StepType,
+    default: StepType.HIGHLIGHT,
+    nullable: false,
+  })
+  stepType: StepType;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt: Date;

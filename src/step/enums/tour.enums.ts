@@ -18,3 +18,12 @@ export enum ActionType {
   SKIP = 'SKIP',
   COMPLETE = 'COMPLETE',
 }
+
+export enum StepType {
+  TOOLTIP = 'tooltip',
+  HIGHLIGHT = 'highlight',
+  MODAL = 'modal',
+  FORM = 'form',
+  TUTORIAL = 'tutorial',
+  CHECKLIST = 'checklist',
+}

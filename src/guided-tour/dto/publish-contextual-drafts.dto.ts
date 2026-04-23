@@ -11,12 +11,13 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { ActionType, PositionType } from '../../step/enums/tour.enums';
+import { ActionType, PositionType, StepType } from '../../step/enums/tour.enums';
 
 export enum ContextualScenario {
   SIMPLE = 'simple',
   MEDIUM = 'medium',
   DYNAMIC = 'dynamic',
+  STRESS = 'stress',
 }
 
 export class ContextualFlowVersioningDto {
@@ -66,6 +67,11 @@ export class ContextualDraftStepDto {
   @IsOptional()
   @ApiProperty({ required: false, default: true })
   highlightElement?: boolean;
+
+  @IsEnum(StepType)
+  @IsOptional()
+  @ApiProperty({ enum: StepType, required: false, default: StepType.HIGHLIGHT })
+  stepType?: StepType;
 
   @IsBoolean()
   @IsOptional()

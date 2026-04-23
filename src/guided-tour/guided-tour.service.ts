@@ -12,7 +12,7 @@ import {
   ContextualSuggestedDraftDto,
   PublishContextualDraftsDto,
 } from './dto/publish-contextual-drafts.dto';
-import { ActionType, PositionType } from '../step/enums/tour.enums';
+import { ActionType, PositionType, StepType } from '../step/enums/tour.enums';
 
 type ScenarioThreshold = {
   minConfidence: number;
@@ -31,6 +31,14 @@ type ContextualEngineMeta = {
   flowVersion?: string;
   flowSignature?: string;
   version?: number;
+};
+
+type ActivationPolicyDecision = {
+  requestedAutoActivate: boolean;
+  effectiveAutoActivate: boolean;
+  mode: 'auto' | 'manual_review';
+  reason: 'allowed' | 'production_guard';
+  environment: string;
 };
 
 @Injectable()
@@ -54,6 +62,12 @@ export class GuidedTourService {
       minStableSteps: 1,
       activationConfidence: 72,
     },
+    [ContextualScenario.STRESS]: {
+      minConfidence: 68,
+      minScore: 88,
+      minStableSteps: 2,
+      activationConfidence: 75,
+    },
   };
 
   constructor(
@@ -75,11 +89,17 @@ export class GuidedTourService {
     rejected: number;
     skipped: number;
     details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }>;
+    monitoring: {
+      environment: string;
+      activationPolicyMode: 'auto' | 'manual_review';
+      reasonsBreakdown: Record<string, number>;
+      postPublishChecks: string[];
+    };
   }> {
     await this.organizationService.findById(organizationId);
 
     const threshold = this.scenarioThresholds[dto.scenario];
-    const autoActivate = dto.autoActivate ?? true;
+    const activationPolicy = this.resolveActivationPolicy(dto.autoActivate ?? true);
     const targetUrls = [...new Set(dto.drafts.map((draft) => draft.targetUrl).filter(Boolean))];
 
     const existingTours = targetUrls.length
@@ -113,6 +133,10 @@ export class GuidedTourService {
         reasons.push('missing_flow_signature');
       }
 
+      if (!this.isScenarioConsistentWithTargetUrl(dto.scenario, draft.targetUrl)) {
+        reasons.push('scenario_target_mismatch');
+      }
+
       const quality = this.evaluateDraftQuality(draft, dto.scenario, threshold);
       reasons.push(...quality.reasons);
 
@@ -131,12 +155,19 @@ export class GuidedTourService {
 
       const version = this.computeNextVersion(existingTours, draft.targetUrl, intent);
       const shouldActivate =
-        autoActivate &&
+        activationPolicy.effectiveAutoActivate &&
         draft.confidence >= threshold.activationConfidence &&
         draft.score >= threshold.minScore &&
         quality.primaryStable &&
         !quality.hasCriticalConflict &&
         quality.intentTargetCoherent;
+
+      const outcomeReasons = shouldActivate
+        ? ['auto_activated']
+        : [
+            activationPolicy.effectiveAutoActivate ? 'saved_pending_review' : 'saved_pending_review_policy_guard',
+            ...(activationPolicy.effectiveAutoActivate ? [] : ['auto_activation_disabled_by_policy']),
+          ];
 
       const tour = await this.create(
         {
@@ -157,6 +188,13 @@ export class GuidedTourService {
               flowVersion: draft.flowVersioning.flowVersion,
               flowSignature,
               version,
+              activationPolicy: {
+                mode: activationPolicy.mode,
+                reason: activationPolicy.reason,
+                requestedAutoActivate: activationPolicy.requestedAutoActivate,
+                effectiveAutoActivate: activationPolicy.effectiveAutoActivate,
+                environment: activationPolicy.environment,
+              },
               explainability: draft.explainability ?? {},
               diagnostics: draft.diagnostics ?? {},
               metadata: draft.metadata ?? {},
@@ -172,6 +210,7 @@ export class GuidedTourService {
             action: this.normalizeAction(step.action),
             skipAllowed: step.skipAllowed ?? true,
             highlightElement: step.highlightElement ?? true,
+            stepType: this.normalizeStepType(step.stepType),
           })),
         },
         organizationId,
@@ -186,7 +225,7 @@ export class GuidedTourService {
       details.push({
         draftName: draft.name,
         outcome: shouldActivate ? 'activated' : 'created',
-        reasons: [shouldActivate ? 'auto_activated' : 'saved_pending_review'],
+        reasons: outcomeReasons,
         tourId: tour.id,
       });
 
@@ -201,6 +240,16 @@ export class GuidedTourService {
       rejected,
       skipped,
       details,
+      monitoring: {
+        environment: activationPolicy.environment,
+        activationPolicyMode: activationPolicy.mode,
+        reasonsBreakdown: this.buildReasonsBreakdown(details),
+        postPublishChecks: [
+          'Monitor activation and completion rates over 24h.',
+          'Review rejected reasons and tune thresholds before broad rollout.',
+          'Sample top 3 activated tours and validate step selectors still resolve.',
+        ],
+      },
     };
   }
 
@@ -254,7 +303,7 @@ export class GuidedTourService {
       reasons.push('stable_selector_coverage_too_low');
     }
 
-    if (scenario === ContextualScenario.DYNAMIC) {
+    if (scenario === ContextualScenario.DYNAMIC || scenario === ContextualScenario.STRESS) {
       const rejectedNoise = this.extractRejectedNoiseMetric(draft);
       if (rejectedNoise !== undefined && rejectedNoise <= 0) {
         reasons.push('dynamic_noise_robustness_failed');
@@ -362,6 +411,13 @@ export class GuidedTourService {
     return ActionType[action] ? action : ActionType.NEXT;
   }
 
+  private normalizeStepType(stepType?: StepType): StepType {
+    if (!stepType) {
+      return StepType.HIGHLIGHT;
+    }
+    return Object.values(StepType).includes(stepType) ? stepType : StepType.HIGHLIGHT;
+  }
+
   private computeNextVersion(existingTours: GuidedTour[], targetUrl: string, intent: string): number {
     let maxVersion = 0;
     for (const tour of existingTours) {
@@ -390,6 +446,53 @@ export class GuidedTourService {
       return undefined;
     }
     return contextualEngine as ContextualEngineMeta;
+  }
+
+  private resolveActivationPolicy(requestedAutoActivate: boolean): ActivationPolicyDecision {
+    const environment = process.env.NODE_ENV || 'development';
+    const allowAutoActivateInProduction = process.env.CONTEXTUAL_PUBLISH_AUTO_ACTIVATE_IN_PROD === 'true';
+    const productionGuardActive = environment === 'production' && !allowAutoActivateInProduction;
+    const effectiveAutoActivate = requestedAutoActivate && !productionGuardActive;
+
+    return {
+      requestedAutoActivate,
+      effectiveAutoActivate,
+      mode: effectiveAutoActivate ? 'auto' : 'manual_review',
+      reason: productionGuardActive ? 'production_guard' : 'allowed',
+      environment,
+    };
+  }
+
+  private isScenarioConsistentWithTargetUrl(scenario: ContextualScenario, targetUrl: string): boolean {
+    const normalizedUrl = (targetUrl || '').toLowerCase();
+    const expectedScenario = this.extractScenarioFromTargetUrl(normalizedUrl);
+    if (!expectedScenario) {
+      return true;
+    }
+    return expectedScenario === scenario;
+  }
+
+  private extractScenarioFromTargetUrl(targetUrl: string): ContextualScenario | null {
+    if (!targetUrl.includes('/dashboard/sdk-tests/')) {
+      return null;
+    }
+    if (targetUrl.includes('/dashboard/sdk-tests/simple')) return ContextualScenario.SIMPLE;
+    if (targetUrl.includes('/dashboard/sdk-tests/medium')) return ContextualScenario.MEDIUM;
+    if (targetUrl.includes('/dashboard/sdk-tests/dynamic')) return ContextualScenario.DYNAMIC;
+    if (targetUrl.includes('/dashboard/sdk-tests/stress')) return ContextualScenario.STRESS;
+    return null;
+  }
+
+  private buildReasonsBreakdown(
+    details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }>,
+  ): Record<string, number> {
+    const breakdown: Record<string, number> = {};
+    for (const detail of details) {
+      for (const reason of detail.reasons) {
+        breakdown[reason] = (breakdown[reason] || 0) + 1;
+      }
+    }
+    return breakdown;
   }
 
   // Créer un parcours avec ses étapes
