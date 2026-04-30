@@ -15,6 +15,8 @@ async function bootstrap() {
       'http://localhost:3001',      // Dashboard en local (dev)
       'http://localhost:3003',      // Dashboard via Docker
       'http://localhost:3021',      // Dashboard via docker-compose.dev (host)
+      'http://localhost:5173',      // ReactTest app (default Vite port)
+      'http://localhost:5174',      // ReactTest app (fallback if 5173 taken)
       'http://dashboard:3000',      // Dashboard dans Docker (interne)
       'http://localhost:3000',      // Pour les tests
     ],

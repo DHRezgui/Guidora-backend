@@ -45,28 +45,28 @@ type ActivationPolicyDecision = {
 export class GuidedTourService {
   private readonly scenarioThresholds: Record<ContextualScenario, ScenarioThreshold> = {
     [ContextualScenario.SIMPLE]: {
-      minConfidence: 45,
-      minScore: 50,
+      minConfidence: 40,
+      minScore: 45,
       minStableSteps: 1,
-      activationConfidence: 70,
+      activationConfidence: 65,
     },
     [ContextualScenario.MEDIUM]: {
-      minConfidence: 62,
-      minScore: 80,
+      minConfidence: 56,
+      minScore: 72,
       minStableSteps: 2,
-      activationConfidence: 70,
+      activationConfidence: 68,
     },
     [ContextualScenario.DYNAMIC]: {
-      minConfidence: 66,
-      minScore: 85,
+      minConfidence: 60,
+      minScore: 82,
       minStableSteps: 1,
-      activationConfidence: 72,
+      activationConfidence: 70,
     },
     [ContextualScenario.STRESS]: {
-      minConfidence: 68,
-      minScore: 88,
+      minConfidence: 63,
+      minScore: 85,
       minStableSteps: 2,
-      activationConfidence: 75,
+      activationConfidence: 73,
     },
   };
 
