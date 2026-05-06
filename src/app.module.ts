@@ -19,6 +19,7 @@ import { FaqModule } from './faq/faq.module';
 import { User } from './user/entities/user.entity';
 import { Organization } from './organization/entities/organization.entity';
 import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
+import { TourUserState } from './guided-tour/entities/tour-user-state.entity';
 import { Step } from './step/entities/step.entity';
 import { BehaviorEvent } from './tracking/entities/behavior_event.entity';
 import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis.entity';
@@ -46,7 +47,7 @@ import { MlModule } from './ml/ml.module';
       username: process.env.DB_USER || 'admin',
       password: process.env.DB_PASSWORD || 'password123',
       database: process.env.DB_NAME || 'onboarding',
-      entities: [User, Organization, GuidedTour, Step, BehaviorEvent, BehaviorAnalysis],
+      entities: [User, Organization, GuidedTour, TourUserState, Step, BehaviorEvent, BehaviorAnalysis],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',
       uuidExtension: 'pgcrypto',

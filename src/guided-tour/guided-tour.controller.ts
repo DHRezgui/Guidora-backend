@@ -8,7 +8,10 @@ import { UserRole } from '../user/entities/user.entity';
 import { GuidedTourService } from './guided-tour.service';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
+import { ResetTourUserDto } from './dto/reset-tour-user.dto';
+import { ResetTourSegmentDto } from './dto/reset-tour-segment.dto';
 import { GuidedTour } from './entities/guided-tour.entity';
+import { TourUserStateStatus } from './entities/tour-user-state.entity';
 import { ApiAuth } from '../swagger/security-schemas';
 import { PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 
@@ -266,11 +269,126 @@ export class GuidedTourController {
     @CurrentUser() user: any,
   ) {
     const organizationId = this.getOrganizationId(user);
-    const tours = await this.tourService.findActiveToursForUrl(url, organizationId);
+    const tours = await this.tourService.findActiveToursForUrl(url, organizationId, user?.id);
     return {
       success: true,
       count: tours.length,
       tours,
+    };
+  }
+
+  @Post(':id/dismiss')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Dismiss a tour for current user',
+    description: 'Marks this tour as dismissed for the authenticated user only.',
+  })
+  async dismissForCurrentUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    await this.tourService.setTourUserState(id, organizationId, user.id, TourUserStateStatus.DISMISSED);
+    return {
+      success: true,
+      message: 'Tour dismissed for current user',
+    };
+  }
+
+  @Post(':id/complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete a tour for current user',
+    description: 'Marks this tour as completed for the authenticated user only.',
+  })
+  async completeForCurrentUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    await this.tourService.setTourUserState(id, organizationId, user.id, TourUserStateStatus.COMPLETED);
+    return {
+      success: true,
+      message: 'Tour completed for current user',
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/reset-audience')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset tour audience state',
+    description: 'Clears dismissed/completed state for all users of this organization so the tour can be shown again.',
+  })
+  async resetAudienceState(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const clearedStates = await this.tourService.resetTourAudienceState(id, organizationId);
+    return {
+      success: true,
+      message: 'Tour audience state reset successfully',
+      clearedStates,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/reset-user')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset tour state for one user',
+    description: 'Reactivates this tour for a specific user by clearing its user state.',
+  })
+  async resetUserState(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ResetTourUserDto,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const clearedStates = await this.tourService.resetTourStateForUser(id, organizationId, body.userId);
+    return {
+      success: true,
+      message: 'Tour state reset for user',
+      clearedStates,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/reset-segment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset tour state for a segment',
+    description: 'Reactivates this tour for users matching a segment definition.',
+  })
+  async resetSegmentState(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ResetTourSegmentDto,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const result = await this.tourService.resetTourStateForSegment(id, organizationId, body);
+    return {
+      success: true,
+      message: 'Tour state reset for segment',
+      ...result,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('jobs/replay/run')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Run replay eligibility job',
+    description: 'Marks expired dismiss/complete states as eligible based on replay policy windows.',
+  })
+  async runReplayJob(@CurrentUser() user: any) {
+    const organizationId = this.getOrganizationId(user);
+    const result = await this.tourService.runReplayEligibilityJob(organizationId);
+    return {
+      success: true,
+      message: 'Replay eligibility job executed',
+      ...result,
     };
   }
 

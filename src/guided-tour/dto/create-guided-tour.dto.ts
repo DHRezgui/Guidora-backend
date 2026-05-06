@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsNumber, IsObject, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsNumber, IsObject, IsArray, ValidateNested, IsIn, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateStepDto } from '../../step/dto/create-step.dto';
+import { TourReplayPolicy } from '../entities/guided-tour.entity';
 
 
 export class CreateGuidedTourDto {
@@ -76,6 +77,28 @@ export class CreateGuidedTourDto {
     },
   })
   simulationContext?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(Object.values(TourReplayPolicy))
+  @ApiProperty({
+    description: 'Replay strategy for already seen users',
+    required: false,
+    enum: TourReplayPolicy,
+    default: TourReplayPolicy.NEVER,
+  })
+  replayPolicy?: TourReplayPolicy;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @ApiProperty({
+    description: 'Days before replay when replayPolicy is after_period',
+    required: false,
+    example: 30,
+    default: 0,
+  })
+  replayAfterDays?: number;
 
   @IsArray({ message: 'Les étapes doivent être un tableau' })
   @ValidateNested({ each: true })

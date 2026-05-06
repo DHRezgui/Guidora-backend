@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
-import { GuidedTour } from './entities/guided-tour.entity';
+import { Repository, In, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { GuidedTour, TourReplayPolicy } from './entities/guided-tour.entity';
+import { TourUserState, TourUserStateStatus } from './entities/tour-user-state.entity';
 import { Step } from '../step/entities/step.entity';
+import { User } from '../user/entities/user.entity';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
+import { ResetTourSegmentDto, TourResetSegment } from './dto/reset-tour-segment.dto';
 import { OrganizationService } from '../organization/organization.service';
 import {
   ContextualDraftStepDto,
@@ -73,8 +76,12 @@ export class GuidedTourService {
   constructor(
     @InjectRepository(GuidedTour)
     private tourRepository: Repository<GuidedTour>,
+    @InjectRepository(TourUserState)
+    private tourUserStateRepository: Repository<TourUserState>,
     @InjectRepository(Step)
     private stepRepository: Repository<Step>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private organizationService: OrganizationService,
   ) {}
 
@@ -510,6 +517,9 @@ export class GuidedTourService {
       createdBy,
       triggerConditions: createTourDto.triggerConditions || {},
       simulationContext: createTourDto.simulationContext,
+      replayPolicy: createTourDto.replayPolicy ?? TourReplayPolicy.NEVER,
+      replayAfterDays: createTourDto.replayAfterDays ?? 0,
+      currentResetVersion: 0,
     });
 
     // Sauvegarder le tour pour obtenir l'ID
@@ -583,6 +593,12 @@ export class GuidedTourService {
     if (updateTourDto.simulationContext !== undefined) {
       tour.simulationContext = updateTourDto.simulationContext;
     }
+    if (updateTourDto.replayPolicy !== undefined) {
+      tour.replayPolicy = updateTourDto.replayPolicy;
+    }
+    if (updateTourDto.replayAfterDays !== undefined) {
+      tour.replayAfterDays = Math.max(0, updateTourDto.replayAfterDays);
+    }
 
     // Sauvegarder le tour mis à jour
     await this.tourRepository.save(tour);
@@ -623,8 +639,8 @@ export class GuidedTourService {
   }
 
   // Trouver les parcours actifs pour une URL cible
-  async findActiveToursForUrl(url: string, organizationId: string): Promise<GuidedTour[]> {
-    return this.tourRepository.find({
+  async findActiveToursForUrl(url: string, organizationId: string, userId?: string): Promise<GuidedTour[]> {
+    const tours = await this.tourRepository.find({
       where: {
         organizationId,
         targetUrl: url,
@@ -633,5 +649,220 @@ export class GuidedTourService {
       relations: ['steps'],
       order: { priority: 'DESC' },
     });
+
+    if (!userId || tours.length === 0) {
+      return tours;
+    }
+
+    const tourIds = tours.map((tour) => tour.id);
+    const dismissedStates = await this.tourUserStateRepository.find({
+      where: {
+        organizationId,
+        userId,
+        tourId: In(tourIds),
+      },
+    });
+    const blockedTourIdSet = new Set<string>();
+    const now = new Date();
+    for (const state of dismissedStates) {
+      if (state.status !== TourUserStateStatus.DISMISSED && state.status !== TourUserStateStatus.COMPLETED) {
+        continue;
+      }
+      const tour = tours.find((item) => item.id === state.tourId);
+      if (!tour) {
+        blockedTourIdSet.add(state.tourId);
+        continue;
+      }
+      if (state.resetVersion < (tour.currentResetVersion || 0)) {
+        continue;
+      }
+      if (tour.replayPolicy === TourReplayPolicy.ALWAYS_ON_NEW_VERSION) {
+        blockedTourIdSet.add(state.tourId);
+        continue;
+      }
+      if (tour.replayPolicy === TourReplayPolicy.AFTER_PERIOD) {
+        const nextEligibleAt = state.nextEligibleAt
+          ? new Date(state.nextEligibleAt)
+          : this.computeNextEligibleAt(tour, state.updatedAt);
+        if (nextEligibleAt && now < nextEligibleAt) {
+          blockedTourIdSet.add(state.tourId);
+        }
+        continue;
+      }
+      if (tour.replayPolicy === TourReplayPolicy.NEVER) {
+        blockedTourIdSet.add(state.tourId);
+      }
+    }
+
+    return tours.filter((tour) => !blockedTourIdSet.has(tour.id));
+  }
+
+  async setTourUserState(
+    tourId: string,
+    organizationId: string,
+    userId: string,
+    status: TourUserStateStatus,
+  ): Promise<TourUserState> {
+    const tour = await this.findById(tourId, organizationId);
+
+    let entity = await this.tourUserStateRepository.findOne({
+      where: {
+        tourId,
+        organizationId,
+        userId,
+      },
+    });
+
+    if (!entity) {
+      entity = this.tourUserStateRepository.create({
+        tourId,
+        organizationId,
+        userId,
+        status,
+        resetVersion: tour.currentResetVersion || 0,
+      });
+    } else {
+      entity.status = status;
+      entity.resetVersion = tour.currentResetVersion || 0;
+    }
+    entity.expiresAt = null;
+    entity.nextEligibleAt = this.computeNextEligibleAt(tour, new Date());
+
+    return this.tourUserStateRepository.save(entity);
+  }
+
+  async resetTourAudienceState(tourId: string, organizationId: string): Promise<number> {
+    const tour = await this.findById(tourId, organizationId);
+    const impacted = await this.tourUserStateRepository.count({
+      where: { tourId, organizationId },
+    });
+    tour.currentResetVersion = (tour.currentResetVersion || 0) + 1;
+    await this.tourRepository.save(tour);
+    return impacted;
+  }
+
+  async resetTourStateForUser(tourId: string, organizationId: string, userId: string): Promise<number> {
+    await this.findById(tourId, organizationId);
+    const result = await this.tourUserStateRepository.delete({
+      tourId,
+      organizationId,
+      userId,
+    });
+    return result.affected || 0;
+  }
+
+  async resetTourStateForSegment(
+    tourId: string,
+    organizationId: string,
+    dto: ResetTourSegmentDto,
+  ): Promise<{ matchedUsers: number; clearedStates: number }> {
+    await this.findById(tourId, organizationId);
+    const userIds = await this.resolveSegmentUserIds(organizationId, dto);
+    if (userIds.length === 0) {
+      return { matchedUsers: 0, clearedStates: 0 };
+    }
+    const result = await this.tourUserStateRepository.delete({
+      tourId,
+      organizationId,
+      userId: In(userIds),
+    });
+    return {
+      matchedUsers: userIds.length,
+      clearedStates: result.affected || 0,
+    };
+  }
+
+  async runReplayEligibilityJob(organizationId?: string): Promise<{ updatedStates: number }> {
+    const whereClause: any = {
+      status: In([TourUserStateStatus.DISMISSED, TourUserStateStatus.COMPLETED]),
+      nextEligibleAt: LessThanOrEqual(new Date()),
+    };
+    if (organizationId) {
+      whereClause.organizationId = organizationId;
+    }
+    const candidates = await this.tourUserStateRepository.find({
+      where: whereClause,
+      relations: ['tour'],
+    });
+    let updatedStates = 0;
+    for (const state of candidates) {
+      if (!state.tour || state.tour.replayPolicy !== TourReplayPolicy.AFTER_PERIOD) {
+        continue;
+      }
+      state.status = TourUserStateStatus.ELIGIBLE;
+      await this.tourUserStateRepository.save(state);
+      updatedStates += 1;
+    }
+    return { updatedStates };
+  }
+
+  private computeNextEligibleAt(tour: GuidedTour, baseDate: Date): Date | null {
+    if (tour.replayPolicy !== TourReplayPolicy.AFTER_PERIOD || !tour.replayAfterDays || tour.replayAfterDays <= 0) {
+      return null;
+    }
+    const next = new Date(baseDate);
+    next.setDate(next.getDate() + tour.replayAfterDays);
+    return next;
+  }
+
+  private async resolveSegmentUserIds(organizationId: string, dto: ResetTourSegmentDto): Promise<string[]> {
+    if (dto.segment === TourResetSegment.ALL) {
+      const users = await this.userRepository.find({
+        where: { organizationId },
+        select: ['id'],
+      });
+      return users.map((user) => user.id);
+    }
+
+    if (dto.segment === TourResetSegment.CUSTOM_USER_IDS) {
+      const userIds = dto.userIds || [];
+      if (userIds.length === 0) {
+        return [];
+      }
+      const users = await this.userRepository.find({
+        where: {
+          organizationId,
+          id: In(userIds),
+        },
+        select: ['id'],
+      });
+      return users.map((user) => user.id);
+    }
+
+    if (dto.segment === TourResetSegment.NEW_USERS) {
+      const createdWithinDays = dto.createdWithinDays ?? 14;
+      const since = new Date();
+      since.setDate(since.getDate() - createdWithinDays);
+      const users = await this.userRepository.find({
+        where: {
+          organizationId,
+          createdAt: MoreThanOrEqual(since),
+        },
+        select: ['id'],
+      });
+      return users.map((user) => user.id);
+    }
+
+    if (dto.segment === TourResetSegment.INACTIVE_USERS) {
+      const inactiveDays = dto.inactiveDays ?? 60;
+      const before = new Date();
+      before.setDate(before.getDate() - inactiveDays);
+      const users = await this.userRepository.find({
+        where: [
+          {
+            organizationId,
+            lastLoginAt: IsNull(),
+          },
+          {
+            organizationId,
+            lastLoginAt: LessThanOrEqual(before),
+          },
+        ],
+        select: ['id'],
+      });
+      return users.map((user) => user.id);
+    }
+
+    return [];
   }
 }

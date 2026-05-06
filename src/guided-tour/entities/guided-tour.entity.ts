@@ -3,6 +3,12 @@ import { Organization } from '../../organization/entities/organization.entity';
 import { User } from '../../user/entities/user.entity';
 import { Step } from '../../step/entities/step.entity';
 
+export enum TourReplayPolicy {
+  NEVER = 'never',
+  AFTER_PERIOD = 'after_period',
+  ALWAYS_ON_NEW_VERSION = 'always_on_new_version',
+}
+
 @Entity('guided_tours')
 export class GuidedTour {
   @PrimaryGeneratedColumn('uuid')
@@ -35,6 +41,21 @@ export class GuidedTour {
 
   @Column({ type: 'jsonb', nullable: true, name: 'simulation_context' })
   simulationContext?: Record<string, any>;
+
+  @Column({
+    type: 'enum',
+    enum: TourReplayPolicy,
+    enumName: 'tour_replay_policy',
+    name: 'replay_policy',
+    default: TourReplayPolicy.NEVER,
+  })
+  replayPolicy: TourReplayPolicy;
+
+  @Column({ type: 'int', name: 'replay_after_days', default: 0 })
+  replayAfterDays: number;
+
+  @Column({ type: 'int', name: 'current_reset_version', default: 0 })
+  currentResetVersion: number;
 
   @Column({ type: 'uuid', nullable: true, name: 'created_by' })
   createdBy?: string;
