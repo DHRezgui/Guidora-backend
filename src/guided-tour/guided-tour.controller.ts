@@ -14,13 +14,18 @@ import { GuidedTour } from './entities/guided-tour.entity';
 import { TourUserStateStatus } from './entities/tour-user-state.entity';
 import { ApiAuth } from '../swagger/security-schemas';
 import { PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
+import { ContextualFeedbackService } from './contextual-feedback.service';
+import { SubmitContextualFeedbackDto } from './dto/submit-contextual-feedback.dto';
 
 @ApiTags('Guided Tour')
 @Controller('tours')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiAuth()
 export class GuidedTourController {
-  constructor(private readonly tourService: GuidedTourService) {}
+  constructor(
+    private readonly tourService: GuidedTourService,
+    private readonly contextualFeedbackService: ContextualFeedbackService,
+  ) {}
 
   private getOrganizationId(user: any): string {
     const organizationId = user?.organizationId || user?.organizations?.[0]?.id;
@@ -128,6 +133,54 @@ export class GuidedTourController {
       success: true,
       message: 'Contextual drafts processed successfully',
       report,
+    };
+  }
+
+  @Post('contextual/feedback')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Ingest contextual feedback events',
+    description:
+      'Accepts batched feedback deltas (shown/clicked/completed/skipped) from the SDK runtime and upserts cumulative aggregates per (org, targetUrl, selector, intent).',
+  })
+  @ApiResponse({ status: 202, description: 'Feedback batch accepted' })
+  async submitContextualFeedback(
+    @Body() dto: SubmitContextualFeedbackDto,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const result = await this.contextualFeedbackService.ingestBatch(organizationId, dto);
+    return {
+      success: true,
+      accepted: result.accepted,
+    };
+  }
+
+  @Get('contextual/feedback/aggregates')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Read contextual feedback aggregates',
+    description:
+      'Returns cumulative feedback counters for the current organization, optionally filtered by targetUrl. The SDK uses this to bias contextual draft scoring with cross-user signal.',
+  })
+  @ApiQuery({ name: 'targetUrl', required: false })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max 2000, default 500' })
+  @ApiResponse({ status: 200, description: 'Aggregate list' })
+  async getContextualFeedbackAggregates(
+    @CurrentUser() user: any,
+    @Query('targetUrl') targetUrl?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    const aggregates = await this.contextualFeedbackService.getAggregates(organizationId, {
+      targetUrl,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    });
+    return {
+      success: true,
+      count: aggregates.length,
+      aggregates,
     };
   }
 
