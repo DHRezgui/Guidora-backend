@@ -16,6 +16,7 @@ import { ApiAuth } from '../swagger/security-schemas';
 import { PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 import { ContextualFeedbackService } from './contextual-feedback.service';
 import { SubmitContextualFeedbackDto } from './dto/submit-contextual-feedback.dto';
+import { ContextualSemanticHintsRequestDto } from './dto/contextual-semantic-hints.dto';
 
 @ApiTags('Guided Tour')
 @Controller('tours')
@@ -105,6 +106,23 @@ export class GuidedTourController {
       message: 'Tour created successfully',
       tour,
     };
+  }
+
+  @Post('contextual/semantic-hints')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Compute semantic role hints for SDK candidates',
+    description:
+      'Read-only inference endpoint backing the SDK hybrid semantic layer. The SDK fuses these hints with its local inference within bounded deltas. Failures or timeouts on the SDK side fall back to local-only inference, so this endpoint is purely additive.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Semantic role hints computed successfully',
+  })
+  async inferContextualSemanticHints(
+    @Body() dto: ContextualSemanticHintsRequestDto,
+  ) {
+    return this.tourService.inferContextualSemanticHints(dto);
   }
 
   @Roles(UserRole.ADMIN)

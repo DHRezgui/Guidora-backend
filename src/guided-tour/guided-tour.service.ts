@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { GuidedTour, TourReplayPolicy } from './entities/guided-tour.entity';
 import { TourUserState, TourUserStateStatus } from './entities/tour-user-state.entity';
 import { Step } from '../step/entities/step.entity';
@@ -16,6 +19,43 @@ import {
   PublishContextualDraftsDto,
 } from './dto/publish-contextual-drafts.dto';
 import { ActionType, PositionType, StepType } from '../step/enums/tour.enums';
+import { ContextualSemanticHintsRequestDto } from './dto/contextual-semantic-hints.dto';
+
+export type ContextualSemanticRole =
+  | 'entry'
+  | 'navigation'
+  | 'cta-primary'
+  | 'form-field'
+  | 'form-submit'
+  | 'utility'
+  | 'secondary'
+  | 'result'
+  | 'generic-click';
+
+export interface ContextualSemanticHintResponse {
+  roles: Array<{
+    selector: string;
+    role: ContextualSemanticRole;
+    confidence: number;
+    rationale?: string[];
+  }>;
+  preferredOrder?: string[];
+  /**
+   * Metadata advertising what powers the endpoint for THIS response.
+   * The endpoint tries the sentence-transformers path first and falls
+   * back to the deterministic rule-vote mirror on timeout / Python
+   * error. The `kind` field reflects what actually ran.
+   */
+  implementation: {
+    kind: 'rule-based-mirror' | 'sentence-transformers';
+    note: string;
+    phase: 'phase-1-local' | 'phase-2-embeddings';
+    /** Sentence-transformers model id, when applicable. */
+    model?: string;
+    /** Why the rule fallback was used (only when kind == 'rule-based-mirror'). */
+    fallbackReason?: 'embeddings_disabled' | 'embeddings_timeout' | 'embeddings_error';
+  };
+}
 
 type ScenarioThreshold = {
   minConfidence: number;
@@ -46,6 +86,21 @@ type ActivationPolicyDecision = {
 
 @Injectable()
 export class GuidedTourService {
+  private readonly logger = new Logger(GuidedTourService.name);
+
+  /**
+   * Resolved once per process. Reads:
+   * - SEMANTIC_TOUR_EMBEDDINGS_ENABLED ('true' to enable embeddings path)
+   * - SEMANTIC_TOUR_EMBEDDINGS_TIMEOUT_MS (default 4000)
+   * - PYTHON_EXECUTABLE (defaults to 'python3' on POSIX, 'python' on Windows)
+   * - SEMANTIC_TOUR_INFERENCE_SCRIPT (defaults to <workspace>/ml/rag/tour_semantic_role_inference.py)
+   */
+  private readonly embeddingsEnabled = (process.env.SEMANTIC_TOUR_EMBEDDINGS_ENABLED ?? 'true').toLowerCase() === 'true';
+  private readonly embeddingsTimeoutMs = Math.max(
+    500,
+    Number.parseInt(process.env.SEMANTIC_TOUR_EMBEDDINGS_TIMEOUT_MS ?? '4000', 10) || 4000,
+  );
+
   private readonly scenarioThresholds: Record<ContextualScenario, ScenarioThreshold> = {
     [ContextualScenario.SIMPLE]: {
       minConfidence: 40,
@@ -84,6 +139,364 @@ export class GuidedTourService {
     private userRepository: Repository<User>,
     private organizationService: OrganizationService,
   ) {}
+
+  /**
+   * Read-only semantic inference endpoint backing the SDK hybrid layer.
+   *
+   * Phase 2 path: this method first tries to run the sentence-transformers
+   * inference script (`ml/rag/tour_semantic_role_inference.py`). If the
+   * Python process times out, errors, or is disabled by env, it falls
+   * back deterministically to the rule-based mirror so the SDK always
+   * receives a usable response within a bounded latency budget.
+   *
+   * The SDK fuses these hints with its local inference within bounded
+   * deltas — failures or timeouts on the SDK side ALSO fall back to
+   * local-only inference, so this endpoint is purely additive even when
+   * both backend paths fail.
+   */
+  async inferContextualSemanticHints(
+    dto: ContextualSemanticHintsRequestDto,
+  ): Promise<ContextualSemanticHintResponse> {
+    if (this.embeddingsEnabled) {
+      const embedded = await this.runEmbeddingInference(dto).catch((error) => {
+        this.logger.warn(`Semantic embedding inference failed: ${this.getErrorMessage(error)}`);
+        return null;
+      });
+
+      if (embedded) {
+        return embedded;
+      }
+
+      return this.runRuleBasedMirror(dto, 'embeddings_error');
+    }
+
+    return this.runRuleBasedMirror(dto, 'embeddings_disabled');
+  }
+
+  /**
+   * Phase 2 — spawn the Python script and parse its JSON output. On any
+   * failure, returns null so the caller can fall back to the rule-based
+   * mirror with a transparent `fallbackReason`.
+   */
+  private async runEmbeddingInference(
+    dto: ContextualSemanticHintsRequestDto,
+  ): Promise<ContextualSemanticHintResponse | null> {
+    const scriptPath = this.resolveTourInferenceScript();
+    if (!scriptPath || !fs.existsSync(scriptPath)) {
+      this.logger.warn(
+        `Semantic inference script not found at "${scriptPath ?? '(unset)'}" — falling back to rule mirror`,
+      );
+      return null;
+    }
+
+    const pythonExecutable = this.resolvePythonExecutable();
+    const scriptCwd = path.dirname(path.dirname(scriptPath));
+
+    const startedAt = Date.now();
+    const stdoutPayload = await new Promise<string | null>((resolve) => {
+      let settled = false;
+      let stdout = '';
+      let stderr = '';
+
+      const child = spawn(pythonExecutable, [scriptPath], {
+        cwd: scriptCwd,
+        env: {
+          ...process.env,
+          PYTHONUTF8: '1',
+          PYTHONIOENCODING: 'utf-8',
+        },
+      });
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.logger.warn(
+          `Semantic inference exceeded ${this.embeddingsTimeoutMs}ms — killing process and falling back`,
+        );
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* noop */
+        }
+        resolve(null);
+      }, this.embeddingsTimeoutMs);
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf-8');
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf-8');
+      });
+      child.on('error', (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.logger.warn(`Semantic inference spawn error: ${error.message}`);
+        resolve(null);
+      });
+      child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (stderr.trim()) {
+          this.logger.debug(`Semantic inference stderr: ${stderr.trim()}`);
+        }
+        if (code !== 0) {
+          this.logger.warn(`Semantic inference exited with code ${code}`);
+          resolve(null);
+          return;
+        }
+        resolve(stdout);
+      });
+
+      try {
+        child.stdin.write(
+          JSON.stringify({
+            candidates: dto.candidates,
+            snapshot: dto.snapshot,
+            hints: dto.hints,
+            objectives: dto.objectives,
+          }),
+        );
+        child.stdin.end();
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          child.kill();
+        } catch {
+          /* noop */
+        }
+        this.logger.warn(`Semantic inference stdin error: ${(error as Error).message}`);
+        resolve(null);
+      }
+    });
+
+    if (!stdoutPayload) {
+      return null;
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(stdoutPayload.trim());
+    } catch (error) {
+      this.logger.warn(
+        `Semantic inference JSON parse failed (${(error as Error).message}); raw="${stdoutPayload.slice(0, 200)}"`,
+      );
+      return null;
+    }
+
+    if (!parsed || parsed.success !== true || !Array.isArray(parsed.roles)) {
+      this.logger.warn(
+        `Semantic inference returned unsuccessful payload (error=${parsed?.error ?? 'unknown'})`,
+      );
+      return null;
+    }
+
+    const roles = (parsed.roles as Array<{ selector?: unknown; role?: unknown; confidence?: unknown; rationale?: unknown }>)
+      .map((row) => this.normaliseEmbeddingHint(row))
+      .filter((row): row is { selector: string; role: ContextualSemanticRole; confidence: number; rationale?: string[] } => row !== null);
+
+    const preferredOrder = Array.isArray(parsed.preferredOrder)
+      ? (parsed.preferredOrder as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      : undefined;
+
+    const model =
+      parsed.implementation && typeof parsed.implementation.model === 'string'
+        ? (parsed.implementation.model as string)
+        : undefined;
+
+    this.logger.log(`Semantic inference (sentence-transformers) succeeded in ${elapsedMs}ms for ${roles.length} candidates`);
+
+    return {
+      roles,
+      preferredOrder,
+      implementation: {
+        kind: 'sentence-transformers',
+        note:
+          'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 embeddings + cosine similarity vs role prototypes. ' +
+          'Confidence is margin-calibrated (top-1 minus top-2 similarity) so the SDK 0.55 guard stays meaningful.',
+        phase: 'phase-2-embeddings',
+        model,
+      },
+    };
+  }
+
+  /**
+   * Deterministic rule-vote classifier mirroring the SDK local engine.
+   * Used as a backend fallback when the embedding path is disabled,
+   * times out, or errors. Reported as `rule-based-mirror` so the lab UI
+   * can show the user exactly what powered each response.
+   */
+  private runRuleBasedMirror(
+    dto: ContextualSemanticHintsRequestDto,
+    fallbackReason?: 'embeddings_disabled' | 'embeddings_timeout' | 'embeddings_error',
+  ): ContextualSemanticHintResponse {
+    const utility = /réglages|settings|preferences|préférences|options|configuration|paramètres|parametres/i;
+    const secondary = /guide|learn|découvrir|discover|aide|help|documentation|tutoriel|tutorial/i;
+    const submit = /confirm|valid|submit|valider|soumettre|enregistrer|publier|sauvegarder|save|apply|appliquer/i;
+    const ctaPrimary =
+      /\b(cr[eé]er|create|d[eé]marrer|start|lancer|launch|ajouter|add|nouveau|nouvelle|new|get started|try|essayer|commencer|configurer|g[eé]n[eé]rer|generate|inviter|invite|importer|import|exporter|export|connecter|connect|relancer|recharger|actualiser|refresh|reload|retry|r[eé]essayer)\b/i;
+    const result = /result|status|done|complete|success|résultat|terminé|fini/i;
+    const entry = /bienvenue|welcome|aperçu|apercu|overview|introduction|commencez|prise en main/i;
+
+    const hasForm = dto.snapshot.hasForm;
+    const hasNav = dto.snapshot.hasNavigation;
+
+    const roles = dto.candidates.map((candidate) => {
+      const label = (candidate.label || '').toString();
+      const tag = (candidate.tag || '').toLowerCase();
+      const intent = (candidate.intent || '').toLowerCase();
+      const zone = (candidate.zone || '').toLowerCase();
+      const rationale: string[] = [];
+
+      let role: ContextualSemanticRole = 'generic-click';
+      let confidence = 0.3;
+
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        role = 'form-field';
+        confidence = 0.85;
+        rationale.push(`form control <${tag}>`);
+      } else if (tag === 'button' && submit.test(label)) {
+        role = 'form-submit';
+        confidence = 0.8;
+        rationale.push(`button labeled like a submit ("${label}")`);
+      } else if (tag === 'button' && ctaPrimary.test(label)) {
+        role = 'cta-primary';
+        confidence = 0.75;
+        rationale.push(`primary CTA verb ("${label}")`);
+      } else if (tag === 'a' && (zone === 'navigation' || zone === 'sidebar')) {
+        role = 'navigation';
+        confidence = 0.75;
+        rationale.push('link inside navigation zone');
+      } else if (utility.test(label)) {
+        role = 'utility';
+        confidence = 0.7;
+        rationale.push(`utility vocabulary ("${label}")`);
+      } else if (secondary.test(label) || intent === 'support-navigation') {
+        role = 'secondary';
+        confidence = 0.6;
+        rationale.push(intent === 'support-navigation' ? 'intent=support-navigation' : `secondary vocabulary ("${label}")`);
+      } else if (entry.test(label) || tag === 'h1' || tag === 'h2') {
+        role = 'entry';
+        confidence = 0.6;
+        rationale.push(tag.startsWith('h') ? `heading <${tag}>` : `entry vocabulary ("${label}")`);
+      } else if (result.test(label)) {
+        role = 'result';
+        confidence = 0.55;
+        rationale.push(`result vocabulary ("${label}")`);
+      } else if (submit.test(label)) {
+        role = 'form-submit';
+        confidence = 0.55;
+        rationale.push(`submit vocabulary ("${label}")`);
+      }
+
+      if (hasForm && (role === 'form-field' || role === 'form-submit')) {
+        confidence = Math.min(1, confidence + 0.05);
+      }
+      if (hasNav && role === 'navigation') {
+        confidence = Math.min(1, confidence + 0.05);
+      }
+
+      return {
+        selector: candidate.selector,
+        role,
+        confidence: Number(confidence.toFixed(3)),
+        rationale,
+      };
+    });
+
+    const order: ContextualSemanticRole[] = [
+      'entry',
+      'navigation',
+      'cta-primary',
+      'form-field',
+      'form-submit',
+      'utility',
+      'secondary',
+      'generic-click',
+      'result',
+    ];
+
+    const preferredOrder = roles
+      .slice()
+      .sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role))
+      .map((role) => role.selector);
+
+    return {
+      roles,
+      preferredOrder,
+      implementation: {
+        kind: 'rule-based-mirror',
+        note: fallbackReason
+          ? `Deterministic rule-vote classifier mirroring the SDK local engine (fallback: ${fallbackReason}).`
+          : 'Deterministic rule-vote classifier mirroring the SDK local engine.',
+        phase: 'phase-1-local',
+        ...(fallbackReason ? { fallbackReason } : {}),
+      },
+    };
+  }
+
+  private normaliseEmbeddingHint(
+    raw: { selector?: unknown; role?: unknown; confidence?: unknown; rationale?: unknown },
+  ): { selector: string; role: ContextualSemanticRole; confidence: number; rationale?: string[] } | null {
+    if (typeof raw.selector !== 'string' || raw.selector.length === 0) return null;
+    if (typeof raw.role !== 'string') return null;
+    const role = this.coerceRole(raw.role);
+    if (!role) return null;
+    const confidenceValue = typeof raw.confidence === 'number' ? raw.confidence : Number(raw.confidence);
+    const confidence = Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0;
+    const rationale = Array.isArray(raw.rationale)
+      ? (raw.rationale as unknown[]).filter((entry): entry is string => typeof entry === 'string').slice(0, 4)
+      : undefined;
+    return { selector: raw.selector, role, confidence, rationale };
+  }
+
+  private coerceRole(value: string): ContextualSemanticRole | null {
+    const allowed: ContextualSemanticRole[] = [
+      'entry',
+      'navigation',
+      'cta-primary',
+      'form-field',
+      'form-submit',
+      'utility',
+      'secondary',
+      'result',
+      'generic-click',
+    ];
+    return (allowed as string[]).includes(value) ? (value as ContextualSemanticRole) : null;
+  }
+
+  private resolveTourInferenceScript(): string | null {
+    const envPath = process.env.SEMANTIC_TOUR_INFERENCE_SCRIPT?.trim();
+    if (envPath) return envPath;
+
+    const cwd = process.cwd();
+    const workspaceRoot = path.basename(cwd).toLowerCase() === 'backend' ? path.resolve(cwd, '..') : cwd;
+
+    const candidates = [
+      path.join(workspaceRoot, 'ml', 'rag', 'tour_semantic_role_inference.py'),
+      path.join(cwd, 'ml', 'rag', 'tour_semantic_role_inference.py'),
+      path.join(cwd, '..', 'ml', 'rag', 'tour_semantic_role_inference.py'),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return candidates[0] ?? null;
+  }
+
+  private resolvePythonExecutable(): string {
+    const envPython = process.env.PYTHON_EXECUTABLE?.trim();
+    if (envPython) return envPython;
+    return process.platform === 'win32' ? 'python' : 'python3';
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  }
 
   async publishContextualDrafts(
     dto: PublishContextualDraftsDto,
@@ -261,6 +674,24 @@ export class GuidedTourService {
     };
   }
 
+  /**
+   * Single-step (or short) primary-action tours only need one stable anchor — typically the CTA.
+   * Multi-step discovery / form sequences keep the scenario threshold (e.g. 2 on MEDIUM).
+   */
+  private resolveRequiredStableSteps(
+    draft: ContextualSuggestedDraftDto,
+    threshold: ScenarioThreshold,
+  ): number {
+    const steps = draft.steps ?? [];
+    const intent = (draft.intent ?? '').toLowerCase();
+
+    if (intent === 'primary-action' && steps.length <= 2) {
+      return 1;
+    }
+
+    return threshold.minStableSteps;
+  }
+
   private evaluateDraftQuality(
     draft: ContextualSuggestedDraftDto,
     scenario: ContextualScenario,
@@ -316,7 +747,8 @@ export class GuidedTourService {
     }
 
     const stableSteps = steps.filter((step) => this.isStableSelector(step.targetSelector)).length;
-    if (stableSteps < threshold.minStableSteps) {
+    const requiredStableSteps = this.resolveRequiredStableSteps(draft, threshold);
+    if (stableSteps < requiredStableSteps) {
       reasons.push('stable_selector_coverage_too_low');
     }
 
@@ -332,6 +764,7 @@ export class GuidedTourService {
         primaryFragile,
         stableSteps,
         minStableSteps: threshold.minStableSteps,
+        requiredStableSteps,
         reasons,
         allSelectors: steps.map((s) => s.targetSelector),
       };
