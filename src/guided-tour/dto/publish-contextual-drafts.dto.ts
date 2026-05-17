@@ -48,6 +48,49 @@ export class ContextualDraftStepDto {
   @ApiProperty({ example: '[data-tour-id="tour-medium-validate-identity"]', required: false })
   targetSelector?: string;
 
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  @ApiProperty({
+    required: false,
+    type: [String],
+    example: ['button[data-testid="place-order"]', 'button[aria-label="Place Order"]'],
+  })
+  selectorAlternatives?: string[];
+
+  @IsObject()
+  @IsOptional()
+  @ApiProperty({
+    required: false,
+    example: {
+      tagName: 'button',
+      role: 'button',
+      ariaLabel: 'Place Order',
+      textSample: 'place order',
+    },
+  })
+  targetFingerprint?: {
+    tagName?: string;
+    role?: string;
+    ariaLabel?: string;
+    textSample?: string;
+  };
+
+  @IsNumber()
+  @IsOptional()
+  @ApiProperty({ required: false, example: 74 })
+  stabilityScore?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @ApiProperty({ required: false, example: 1 })
+  selfHealCount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @ApiProperty({ required: false, example: 0.82 })
+  semanticRoleConfidence?: number;
+
   @IsString()
   @IsOptional()
   @ApiProperty({ example: '/dashboard/billing', required: false })

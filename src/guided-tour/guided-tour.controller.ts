@@ -125,6 +125,19 @@ export class GuidedTourController {
     return this.tourService.inferContextualSemanticHints(dto);
   }
 
+  @Post('contextual/semantic-hints/warmup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Warm up the persistent tour semantic Python worker',
+    description:
+      'Loads sentence-transformers once in a keep-alive worker process. ' +
+      'Also runs automatically on backend start when SEMANTIC_TOUR_AUTO_WARMUP=true.',
+  })
+  @ApiResponse({ status: 200, description: 'Worker warmup status' })
+  async warmupContextualSemanticHints() {
+    return this.tourService.warmupContextualSemanticEmbeddings();
+  }
+
   @Roles(UserRole.ADMIN)
   @Post('contextual/publish')
   @HttpCode(HttpStatus.CREATED)

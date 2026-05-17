@@ -1,8 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
-import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 import { GuidedTour, TourReplayPolicy } from './entities/guided-tour.entity';
 import { TourUserState, TourUserStateStatus } from './entities/tour-user-state.entity';
@@ -20,6 +18,7 @@ import {
 } from './dto/publish-contextual-drafts.dto';
 import { ActionType, PositionType, StepType } from '../step/enums/tour.enums';
 import { ContextualSemanticHintsRequestDto } from './dto/contextual-semantic-hints.dto';
+import { TourSemanticPythonWorkerService } from './tour-semantic-python-worker.service';
 
 export type ContextualSemanticRole =
   | 'entry'
@@ -53,7 +52,11 @@ export interface ContextualSemanticHintResponse {
     /** Sentence-transformers model id, when applicable. */
     model?: string;
     /** Why the rule fallback was used (only when kind == 'rule-based-mirror'). */
-    fallbackReason?: 'embeddings_disabled' | 'embeddings_timeout' | 'embeddings_error';
+    fallbackReason?:
+      | 'embeddings_disabled'
+      | 'embeddings_timeout'
+      | 'embeddings_error'
+      | 'embeddings_worker_unavailable';
   };
 }
 
@@ -93,12 +96,12 @@ export class GuidedTourService {
    * - SEMANTIC_TOUR_EMBEDDINGS_ENABLED ('true' to enable embeddings path)
    * - SEMANTIC_TOUR_EMBEDDINGS_TIMEOUT_MS (default 4000)
    * - PYTHON_EXECUTABLE (defaults to 'python3' on POSIX, 'python' on Windows)
-   * - SEMANTIC_TOUR_INFERENCE_SCRIPT (defaults to <workspace>/ml/rag/tour_semantic_role_inference.py)
+   * - SEMANTIC_TOUR_WORKER_SCRIPT (defaults to ml/rag/tour_semantic_role_worker.py)
    */
   private readonly embeddingsEnabled = (process.env.SEMANTIC_TOUR_EMBEDDINGS_ENABLED ?? 'true').toLowerCase() === 'true';
   private readonly embeddingsTimeoutMs = Math.max(
     500,
-    Number.parseInt(process.env.SEMANTIC_TOUR_EMBEDDINGS_TIMEOUT_MS ?? '4000', 10) || 4000,
+    Number.parseInt(process.env.SEMANTIC_TOUR_EMBEDDINGS_TIMEOUT_MS ?? '8000', 10) || 8000,
   );
 
   private readonly scenarioThresholds: Record<ContextualScenario, ScenarioThreshold> = {
@@ -138,7 +141,28 @@ export class GuidedTourService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private organizationService: OrganizationService,
+    private readonly tourSemanticWorker: TourSemanticPythonWorkerService,
   ) {}
+
+  /**
+   * Warm up the persistent Python worker (loads sentence-transformers once).
+   * Called automatically on backend start unless SEMANTIC_TOUR_AUTO_WARMUP=false.
+   */
+  async warmupContextualSemanticEmbeddings(): Promise<{
+    ready: boolean;
+    warmed: boolean;
+    embeddingsEnabled: boolean;
+  }> {
+    if (!this.embeddingsEnabled) {
+      return { ready: false, warmed: false, embeddingsEnabled: false };
+    }
+    const warmed = await this.tourSemanticWorker.warmup();
+    return {
+      ready: warmed,
+      warmed,
+      embeddingsEnabled: true,
+    };
+  }
 
   /**
    * Read-only semantic inference endpoint backing the SDK hybrid layer.
@@ -158,141 +182,67 @@ export class GuidedTourService {
     dto: ContextualSemanticHintsRequestDto,
   ): Promise<ContextualSemanticHintResponse> {
     if (this.embeddingsEnabled) {
-      const embedded = await this.runEmbeddingInference(dto).catch((error) => {
-        this.logger.warn(`Semantic embedding inference failed: ${this.getErrorMessage(error)}`);
-        return null;
-      });
-
-      if (embedded) {
-        return embedded;
+      const embedded = await this.runEmbeddingInference(dto);
+      if (embedded.ok) {
+        return embedded.response;
       }
-
-      return this.runRuleBasedMirror(dto, 'embeddings_error');
+      return this.runRuleBasedMirror(dto, embedded.reason);
     }
 
     return this.runRuleBasedMirror(dto, 'embeddings_disabled');
   }
 
   /**
-   * Phase 2 — spawn the Python script and parse its JSON output. On any
-   * failure, returns null so the caller can fall back to the rule-based
-   * mirror with a transparent `fallbackReason`.
+   * Phase 2 — persistent Python worker (model loaded once per process).
+   * On timeout / crash (after one restart) falls back with an explicit reason.
    */
   private async runEmbeddingInference(
     dto: ContextualSemanticHintsRequestDto,
-  ): Promise<ContextualSemanticHintResponse | null> {
-    const scriptPath = this.resolveTourInferenceScript();
-    if (!scriptPath || !fs.existsSync(scriptPath)) {
-      this.logger.warn(
-        `Semantic inference script not found at "${scriptPath ?? '(unset)'}" — falling back to rule mirror`,
-      );
-      return null;
-    }
-
-    const pythonExecutable = this.resolvePythonExecutable();
-    const scriptCwd = path.dirname(path.dirname(scriptPath));
-
-    const startedAt = Date.now();
-    const stdoutPayload = await new Promise<string | null>((resolve) => {
-      let settled = false;
-      let stdout = '';
-      let stderr = '';
-
-      const child = spawn(pythonExecutable, [scriptPath], {
-        cwd: scriptCwd,
-        env: {
-          ...process.env,
-          PYTHONUTF8: '1',
-          PYTHONIOENCODING: 'utf-8',
-        },
-      });
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        this.logger.warn(
-          `Semantic inference exceeded ${this.embeddingsTimeoutMs}ms — killing process and falling back`,
-        );
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* noop */
-        }
-        resolve(null);
-      }, this.embeddingsTimeoutMs);
-
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf-8');
-      });
-      child.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString('utf-8');
-      });
-      child.on('error', (error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.logger.warn(`Semantic inference spawn error: ${error.message}`);
-        resolve(null);
-      });
-      child.on('close', (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (stderr.trim()) {
-          this.logger.debug(`Semantic inference stderr: ${stderr.trim()}`);
-        }
-        if (code !== 0) {
-          this.logger.warn(`Semantic inference exited with code ${code}`);
-          resolve(null);
-          return;
-        }
-        resolve(stdout);
-      });
-
-      try {
-        child.stdin.write(
-          JSON.stringify({
-            candidates: dto.candidates,
-            snapshot: dto.snapshot,
-            hints: dto.hints,
-            objectives: dto.objectives,
-          }),
-        );
-        child.stdin.end();
-      } catch (error) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          child.kill();
-        } catch {
-          /* noop */
-        }
-        this.logger.warn(`Semantic inference stdin error: ${(error as Error).message}`);
-        resolve(null);
+  ): Promise<
+    | { ok: true; response: ContextualSemanticHintResponse }
+    | {
+        ok: false;
+        reason: 'embeddings_timeout' | 'embeddings_error' | 'embeddings_worker_unavailable';
       }
-    });
+  > {
+    const startedAt = Date.now();
+    const payload = {
+      candidates: dto.candidates,
+      snapshot: dto.snapshot,
+      hints: dto.hints,
+      objectives: dto.objectives,
+    };
 
-    if (!stdoutPayload) {
-      return null;
-    }
+    const workerResult = await this.tourSemanticWorker.infer(payload, this.embeddingsTimeoutMs);
 
-    const elapsedMs = Date.now() - startedAt;
-    let parsed: any;
-    try {
-      parsed = JSON.parse(stdoutPayload.trim());
-    } catch (error) {
+    if (!workerResult.ok) {
+      if (workerResult.reason === 'timeout') {
+        this.logger.warn(
+          `Semantic embedding inference timed out after ${this.embeddingsTimeoutMs}ms — falling back to rule mirror`,
+        );
+        return { ok: false, reason: 'embeddings_timeout' };
+      }
+      if (
+        workerResult.reason === 'worker_unavailable' ||
+        workerResult.reason === 'worker_crashed'
+      ) {
+        this.logger.warn(
+          `Semantic embedding worker unavailable (${workerResult.reason}): ${workerResult.error ?? 'unknown'}`,
+        );
+        return { ok: false, reason: 'embeddings_worker_unavailable' };
+      }
       this.logger.warn(
-        `Semantic inference JSON parse failed (${(error as Error).message}); raw="${stdoutPayload.slice(0, 200)}"`,
+        `Semantic embedding inference failed (${workerResult.reason}): ${workerResult.error ?? 'unknown'}`,
       );
-      return null;
+      return { ok: false, reason: 'embeddings_error' };
     }
 
+    const parsed = workerResult.result;
     if (!parsed || parsed.success !== true || !Array.isArray(parsed.roles)) {
       this.logger.warn(
-        `Semantic inference returned unsuccessful payload (error=${parsed?.error ?? 'unknown'})`,
+        `Semantic worker returned unsuccessful payload (error=${String(parsed?.error ?? 'unknown')})`,
       );
-      return null;
+      return { ok: false, reason: 'embeddings_error' };
     }
 
     const roles = (parsed.roles as Array<{ selector?: unknown; role?: unknown; confidence?: unknown; rationale?: unknown }>)
@@ -304,22 +254,31 @@ export class GuidedTourService {
       : undefined;
 
     const model =
-      parsed.implementation && typeof parsed.implementation.model === 'string'
-        ? (parsed.implementation.model as string)
+      parsed.implementation &&
+      typeof parsed.implementation === 'object' &&
+      parsed.implementation !== null &&
+      typeof (parsed.implementation as { model?: unknown }).model === 'string'
+        ? ((parsed.implementation as { model: string }).model)
         : undefined;
 
-    this.logger.log(`Semantic inference (sentence-transformers) succeeded in ${elapsedMs}ms for ${roles.length} candidates`);
+    const elapsedMs = Date.now() - startedAt;
+    this.logger.log(
+      `Semantic inference (sentence-transformers, persistent worker) succeeded in ${elapsedMs}ms for ${roles.length} candidates`,
+    );
 
     return {
-      roles,
-      preferredOrder,
-      implementation: {
-        kind: 'sentence-transformers',
-        note:
-          'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 embeddings + cosine similarity vs role prototypes. ' +
-          'Confidence is margin-calibrated (top-1 minus top-2 similarity) so the SDK 0.55 guard stays meaningful.',
-        phase: 'phase-2-embeddings',
-        model,
+      ok: true,
+      response: {
+        roles,
+        preferredOrder,
+        implementation: {
+          kind: 'sentence-transformers',
+          note:
+            'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 embeddings + cosine similarity vs role prototypes (persistent worker). ' +
+            'Confidence is margin-calibrated (top-1 minus top-2 similarity) so the SDK 0.55 guard stays meaningful.',
+          phase: 'phase-2-embeddings',
+          model,
+        },
       },
     };
   }
@@ -332,7 +291,11 @@ export class GuidedTourService {
    */
   private runRuleBasedMirror(
     dto: ContextualSemanticHintsRequestDto,
-    fallbackReason?: 'embeddings_disabled' | 'embeddings_timeout' | 'embeddings_error',
+    fallbackReason?:
+      | 'embeddings_disabled'
+      | 'embeddings_timeout'
+      | 'embeddings_error'
+      | 'embeddings_worker_unavailable',
   ): ContextualSemanticHintResponse {
     const utility = /réglages|settings|preferences|préférences|options|configuration|paramètres|parametres/i;
     const secondary = /guide|learn|découvrir|discover|aide|help|documentation|tutoriel|tutorial/i;
@@ -469,30 +432,6 @@ export class GuidedTourService {
     return (allowed as string[]).includes(value) ? (value as ContextualSemanticRole) : null;
   }
 
-  private resolveTourInferenceScript(): string | null {
-    const envPath = process.env.SEMANTIC_TOUR_INFERENCE_SCRIPT?.trim();
-    if (envPath) return envPath;
-
-    const cwd = process.cwd();
-    const workspaceRoot = path.basename(cwd).toLowerCase() === 'backend' ? path.resolve(cwd, '..') : cwd;
-
-    const candidates = [
-      path.join(workspaceRoot, 'ml', 'rag', 'tour_semantic_role_inference.py'),
-      path.join(cwd, 'ml', 'rag', 'tour_semantic_role_inference.py'),
-      path.join(cwd, '..', 'ml', 'rag', 'tour_semantic_role_inference.py'),
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-    return candidates[0] ?? null;
-  }
-
-  private resolvePythonExecutable(): string {
-    const envPython = process.env.PYTHON_EXECUTABLE?.trim();
-    if (envPython) return envPython;
-    return process.platform === 'win32' ? 'python' : 'python3';
-  }
-
   private getErrorMessage(error: unknown): string {
     if (error instanceof Error) return error.message;
     return String(error);
@@ -588,6 +527,9 @@ export class GuidedTourService {
             activationPolicy.effectiveAutoActivate ? 'saved_pending_review' : 'saved_pending_review_policy_guard',
             ...(activationPolicy.effectiveAutoActivate ? [] : ['auto_activation_disabled_by_policy']),
           ];
+      if (quality.semanticCompensationReasons.length > 0) {
+        outcomeReasons.push(...quality.semanticCompensationReasons);
+      }
 
       const tour = await this.create(
         {
@@ -701,8 +643,10 @@ export class GuidedTourService {
     hasCriticalConflict: boolean;
     primaryStable: boolean;
     intentTargetCoherent: boolean;
+    semanticCompensationReasons: string[];
   } {
     const reasons: string[] = [];
+    const semanticCompensationReasons: string[] = [];
     const steps = draft.steps ?? [];
 
     if (steps.length < 1) {
@@ -722,16 +666,47 @@ export class GuidedTourService {
       reasons.push('missing_target_selector');
     }
 
+    const normalizedIntent = (draft.intent ?? '').toLowerCase();
+    const isPrimaryIntent = normalizedIntent === 'primary-action';
+    const isSupportIntent = normalizedIntent === 'support-navigation';
+    const allowSemanticCompensation = scenario !== ContextualScenario.STRESS;
     const primaryStep = this.pickPrimaryStep(steps);
-    const primarySelector = primaryStep?.targetSelector;
-    const primaryStable = this.isStableSelector(primarySelector);
+    const allowFingerprintBridge = scenario === ContextualScenario.SIMPLE && steps.length <= 3;
+    const qualityAnchorStep =
+      primaryStep && !this.isStepStable(primaryStep, allowFingerprintBridge)
+        ? steps.find(
+            (step) =>
+              this.isStepStable(step, allowFingerprintBridge) ||
+              this.hasStableAlternativeSelector(step) ||
+              (allowFingerprintBridge && this.hasStrongFingerprint(step)),
+          ) ?? primaryStep
+        : primaryStep;
+    const primarySelector = qualityAnchorStep?.targetSelector;
+    const primarySemanticCompensated =
+      allowSemanticCompensation && this.isSemanticCompensationEligible(qualityAnchorStep, scenario);
+    const primaryStable = this.isStepStable(qualityAnchorStep, allowFingerprintBridge) || primarySemanticCompensated;
     const primaryFragile = this.isFragileSelector(primarySelector);
+    const primaryHasStableAlternative = this.hasStableAlternativeSelector(qualityAnchorStep);
+    const supportHasStableAnchor = steps.some(
+      (step) =>
+        this.isStepStable(step, allowFingerprintBridge) ||
+        this.hasStableAlternativeSelector(step) ||
+        (allowFingerprintBridge && this.hasStrongFingerprint(step)),
+    );
+    const supportHasSemanticCompensatedAnchor =
+      allowSemanticCompensation &&
+      steps.some((step) => this.isSemanticCompensationEligible(step, scenario));
 
-    if (primaryFragile && !primaryStable) {
+    if (
+      primaryFragile &&
+      !primaryStable &&
+      !primaryHasStableAlternative &&
+      !(allowFingerprintBridge && this.hasStrongFingerprint(qualityAnchorStep)) &&
+      !(isSupportIntent && (supportHasStableAnchor || supportHasSemanticCompensatedAnchor))
+    ) {
       reasons.push('primary_selector_fragile_only');
     }
 
-    const isPrimaryIntent = (draft.intent ?? '').toLowerCase() === 'primary-action';
     // An `action: 'NEXT'` step is informational by definition — the user just
     // reads the tooltip and clicks "Suivant", they do NOT interact with the
     // anchored element. Demanding an actionable selector on such steps would
@@ -741,12 +716,23 @@ export class GuidedTourService {
     const primaryActionRequired =
       primaryStep?.action !== undefined && primaryStep.action !== ActionType.NEXT;
     const intentTargetCoherent =
-      !isPrimaryIntent || !primaryActionRequired || this.isActionableSelector(primarySelector);
+      !isPrimaryIntent || !primaryActionRequired || this.isStepActionable(primaryStep);
     if (!intentTargetCoherent) {
       reasons.push('primary_intent_not_actionable');
     }
 
-    const stableSteps = steps.filter((step) => this.isStableSelector(step.targetSelector)).length;
+    const stableSteps = steps.filter(
+      (step) =>
+        this.isStepStable(step, allowFingerprintBridge) ||
+        (allowSemanticCompensation && this.isSemanticCompensationEligible(step, scenario)),
+    ).length;
+    if (allowSemanticCompensation) {
+      for (const step of steps) {
+        const compensation = this.getSemanticCompensationReason(step, scenario);
+        if (!compensation) continue;
+        semanticCompensationReasons.push(compensation);
+      }
+    }
     const requiredStableSteps = this.resolveRequiredStableSteps(draft, threshold);
     if (stableSteps < requiredStableSteps) {
       reasons.push('stable_selector_coverage_too_low');
@@ -762,6 +748,7 @@ export class GuidedTourService {
         primarySelector,
         primaryStable,
         primaryFragile,
+        allowFingerprintBridge,
         stableSteps,
         minStableSteps: threshold.minStableSteps,
         requiredStableSteps,
@@ -792,6 +779,7 @@ export class GuidedTourService {
       hasCriticalConflict,
       primaryStable,
       intentTargetCoherent,
+      semanticCompensationReasons,
     };
   }
 
@@ -801,6 +789,81 @@ export class GuidedTourService {
       steps.find((step) => (step.intent ?? '').toLowerCase() === 'primary-action') ??
       steps[0]
     );
+  }
+
+  private hasStableAlternativeSelector(step?: ContextualDraftStepDto): boolean {
+    if (!step?.selectorAlternatives || step.selectorAlternatives.length === 0) {
+      return false;
+    }
+    return step.selectorAlternatives.some((selector) => this.isStableSelector(selector));
+  }
+
+  private hasStrongFingerprint(step?: ContextualDraftStepDto): boolean {
+    const fp = step?.targetFingerprint;
+    if (!fp || typeof fp !== 'object') return false;
+    const tagName = typeof fp.tagName === 'string' ? fp.tagName.trim() : '';
+    const role = typeof fp.role === 'string' ? fp.role.trim() : '';
+    const ariaLabel = typeof fp.ariaLabel === 'string' ? fp.ariaLabel.trim() : '';
+    const textSample = typeof fp.textSample === 'string' ? fp.textSample.trim() : '';
+    if (!tagName) return false;
+    return Boolean(role || ariaLabel || textSample.length >= 6);
+  }
+
+  private hasCompleteFingerprint(step?: ContextualDraftStepDto): boolean {
+    const fp = step?.targetFingerprint;
+    if (!fp || typeof fp !== 'object') return false;
+    const tagName = typeof fp.tagName === 'string' ? fp.tagName.trim() : '';
+    const role = typeof fp.role === 'string' ? fp.role.trim() : '';
+    const textSample = typeof fp.textSample === 'string' ? fp.textSample.trim() : '';
+    return Boolean(tagName && role && textSample.length >= 3);
+  }
+
+  private isSemanticCompensationEligible(
+    step: ContextualDraftStepDto | undefined,
+    scenario: ContextualScenario,
+  ): boolean {
+    if (!step || scenario === ContextualScenario.STRESS) return false;
+    const confidence =
+      typeof step.semanticRoleConfidence === 'number' && Number.isFinite(step.semanticRoleConfidence)
+        ? step.semanticRoleConfidence
+        : 0;
+    const stabilityScore =
+      typeof step.stabilityScore === 'number' && Number.isFinite(step.stabilityScore)
+        ? step.stabilityScore
+        : 0;
+    return confidence >= 0.75 && stabilityScore >= 40 && this.hasCompleteFingerprint(step);
+  }
+
+  private getSemanticCompensationReason(
+    step: ContextualDraftStepDto | undefined,
+    scenario: ContextualScenario,
+  ): string | null {
+    if (!this.isSemanticCompensationEligible(step, scenario)) return null;
+    const confidence = (step?.semanticRoleConfidence ?? 0).toFixed(2);
+    return `published via semantic compensation (confidence: ${confidence})`;
+  }
+
+  private isStepStable(step?: ContextualDraftStepDto, allowFingerprintBridge = false): boolean {
+    if (!step) return false;
+    if (this.isStableSelector(step.targetSelector)) return true;
+    if (this.hasStableAlternativeSelector(step)) return true;
+    if (typeof step.stabilityScore === 'number' && Number.isFinite(step.stabilityScore) && step.stabilityScore >= 70) {
+      return true;
+    }
+    if (this.hasStrongFingerprint(step) && typeof step.stabilityScore === 'number' && step.stabilityScore >= 58) {
+      return true;
+    }
+    // "Unknown domain" bridge: in SIMPLE scenario with short drafts, accept
+    // low-selector-stability steps when a strong fingerprint exists.
+    if (
+      allowFingerprintBridge &&
+      this.hasStrongFingerprint(step) &&
+      typeof step.stabilityScore === 'number' &&
+      step.stabilityScore >= 20
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private isStableSelector(selector?: string): boolean {
@@ -917,6 +980,22 @@ export class GuidedTourService {
     // legitimate actionable target.
     if (/#[A-Za-z][\w-]*\b/.test(selector)) {
       return true;
+    }
+    return false;
+  }
+
+  private isStepActionable(step?: ContextualDraftStepDto): boolean {
+    if (!step) return false;
+    if (this.isActionableSelector(step.targetSelector)) return true;
+    if (step.selectorAlternatives?.some((selector) => this.isActionableSelector(selector))) return true;
+    const fp = step.targetFingerprint;
+    if (fp && typeof fp === 'object') {
+      const tagName = typeof fp.tagName === 'string' ? fp.tagName.toLowerCase() : '';
+      const role = typeof fp.role === 'string' ? fp.role.toLowerCase() : '';
+      if (tagName === 'button' || tagName === 'a' || tagName === 'input') return true;
+      if (['button', 'link', 'tab', 'menuitem', 'option', 'checkbox', 'radio', 'switch'].includes(role)) {
+        return true;
+      }
     }
     return false;
   }

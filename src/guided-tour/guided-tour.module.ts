@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { GuidedTourController } from './guided-tour.controller';
 import { GuidedTourService } from './guided-tour.service';
 import { ContextualFeedbackService } from './contextual-feedback.service';
+import { TourSemanticPythonWorkerService } from './tour-semantic-python-worker.service';
 import { Step } from '../step/entities/step.entity';
 import { GuidedTour } from './entities/guided-tour.entity';
 import { TourUserState } from './entities/tour-user-state.entity';
@@ -22,7 +23,7 @@ import { OrganizationModule } from '../organization/organization.module';
     OrganizationModule,
   ],
   controllers: [GuidedTourController],
-  providers: [GuidedTourService, ContextualFeedbackService],
-  exports: [GuidedTourService, ContextualFeedbackService],
+  providers: [GuidedTourService, ContextualFeedbackService, TourSemanticPythonWorkerService],
+  exports: [GuidedTourService, ContextualFeedbackService, TourSemanticPythonWorkerService],
 })
 export class GuidedTourModule {}
