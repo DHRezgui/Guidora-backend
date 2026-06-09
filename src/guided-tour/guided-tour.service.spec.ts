@@ -1,14 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { GuidedTourService } from './guided-tour.service';
 import { GuidedTour } from './entities/guided-tour.entity';
+import { TourUserState } from './entities/tour-user-state.entity';
 import { Step } from '../step/entities/step.entity';
+import { User } from '../user/entities/user.entity';
+import { TourSemanticPythonWorkerService } from './tour-semantic-python-worker.service';
 import { OrganizationService } from '../organization/organization.service';
 import { CreateGuidedTourDto } from './dto/create-guided-tour.dto';
 import { UpdateGuidedTourDto } from './dto/update-guided-tour.dto';
 import { PositionType, ActionType } from '../step/enums/tour.enums';
 import { ContextualScenario, PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
+import { UserRole } from '../user/entities/user.entity';
+import { TourEnvironment, TourSandboxStatus } from './entities/guided-tour.entity';
 
 describe('GuidedTourService', () => {
   let service: GuidedTourService;
@@ -29,6 +34,24 @@ describe('GuidedTourService', () => {
     save: jest.fn(),
     find: jest.fn(),
     delete: jest.fn(),
+  };
+
+  const mockTourUserStateRepository = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
+  };
+
+  const mockUserRepository = {
+    find: jest.fn(),
+  };
+
+  const mockTourSemanticWorker = {
+    warmup: jest.fn(),
+    inferRoles: jest.fn(),
   };
 
   const mockOrganizationService = {
@@ -63,9 +86,38 @@ describe('GuidedTourService', () => {
     triggerConditions: { minTimeOnPage: 30 },
     organizationId: orgId,
     createdBy: userId,
+    environment: TourEnvironment.PRODUCTION,
+    sandboxStatus: null,
+    developerPrivate: false,
+    assignedAdminIds: [] as string[],
+    assignedToAdminsAt: null,
     createdAt: new Date('2026-02-15T10:30:00.000Z'),
     updatedAt: new Date('2026-02-15T10:30:00.000Z'),
     steps: [mockStepEntity],
+  };
+
+  const mockLabTourEntity = {
+    ...mockTourEntity,
+    targetUrl: '/dashboard/sdk-tests/simple',
+    triggerConditions: {
+      source: 'contextual-engine',
+      contextualEngine: {
+        scenario: ContextualScenario.SIMPLE,
+        flowSignature: 'sig-lab-1',
+      },
+    },
+  };
+
+  const developerActor = {
+    id: userId,
+    role: UserRole.DEVELOPER,
+    authMethod: 'jwt' as const,
+  };
+
+  const adminActor = {
+    id: userId,
+    role: UserRole.ADMIN,
+    authMethod: 'jwt' as const,
   };
 
   beforeEach(async () => {
@@ -81,8 +133,20 @@ describe('GuidedTourService', () => {
           useValue: mockStepRepository,
         },
         {
+          provide: getRepositoryToken(TourUserState),
+          useValue: mockTourUserStateRepository,
+        },
+        {
+          provide: getRepositoryToken(User),
+          useValue: mockUserRepository,
+        },
+        {
           provide: OrganizationService,
           useValue: mockOrganizationService,
+        },
+        {
+          provide: TourSemanticPythonWorkerService,
+          useValue: mockTourSemanticWorker,
         },
       ],
     }).compile();
@@ -98,6 +162,32 @@ describe('GuidedTourService', () => {
 
   // ─────────────────────────────────────────────
   describe('create', () => {
+    it('should mark developer-created tours as private by default', async () => {
+      const dto: CreateGuidedTourDto = {
+        name: 'Parcours privé dev',
+        targetUrl: '/app',
+        steps: [{ title: 'S1', content: 'C', targetSelector: '#a', position: PositionType.BOTTOM, action: ActionType.NEXT }],
+      };
+      mockTourRepository.create.mockImplementation((payload) => payload);
+      mockTourRepository.save.mockImplementation(async (tour) => ({ ...tour, id: 'tour-uuid-1234' }));
+      mockTourRepository.findOneOrFail.mockResolvedValue({
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        developerPrivate: true,
+        assignedAdminIds: [],
+      });
+
+      await service.create(dto, orgId, userId, developerActor);
+
+      expect(mockTourRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          developerPrivate: true,
+          assignedAdminIds: [],
+        }),
+      );
+    });
+
     it('should create a guided tour with steps', async () => {
       const createTourDto: CreateGuidedTourDto = {
         name: 'Premier virement',
@@ -128,16 +218,20 @@ describe('GuidedTourService', () => {
 
       expect(result).toEqual(mockTourEntity);
       expect(mockOrganizationService.findById).toHaveBeenCalledWith(orgId);
-      expect(mockTourRepository.create).toHaveBeenCalledWith({
-        name: 'Premier virement',
-        description: 'Guide pas-à-pas',
-        targetUrl: '/dashboard/transfers',
-        isActive: true,
-        priority: 10,
-        organizationId: orgId,
-        createdBy: userId,
-        triggerConditions: { minTimeOnPage: 30 },
-      });
+      expect(mockTourRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Premier virement',
+          description: 'Guide pas-à-pas',
+          targetUrl: '/dashboard/transfers',
+          isActive: true,
+          priority: 10,
+          organizationId: orgId,
+          createdBy: userId,
+          environment: TourEnvironment.PRODUCTION,
+          sandboxStatus: null,
+          triggerConditions: { minTimeOnPage: 30 },
+        }),
+      );
       expect(mockTourRepository.save).toHaveBeenCalled();
       expect(mockStepRepository.create).toHaveBeenCalled();
       expect(mockStepRepository.save).toHaveBeenCalled();
@@ -212,6 +306,9 @@ describe('GuidedTourService', () => {
     it('should return all tours for an organization', async () => {
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
@@ -234,6 +331,9 @@ describe('GuidedTourService', () => {
     it('should filter by isActive when provided', async () => {
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
@@ -243,7 +343,7 @@ describe('GuidedTourService', () => {
 
       mockTourRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      await service.findAllByOrganization(orgId, true);
+      await service.findAllByOrganization(orgId, undefined, true);
 
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         'tour.is_active = :isActive',
@@ -254,6 +354,9 @@ describe('GuidedTourService', () => {
     it('should not filter by isActive when undefined', async () => {
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
@@ -263,7 +366,7 @@ describe('GuidedTourService', () => {
 
       mockTourRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      await service.findAllByOrganization(orgId, undefined);
+      await service.findAllByOrganization(orgId, undefined, undefined, true);
 
       expect(mockQueryBuilder.andWhere).not.toHaveBeenCalled();
     });
@@ -271,6 +374,9 @@ describe('GuidedTourService', () => {
     it('should return empty array when no tours exist', async () => {
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
@@ -341,7 +447,7 @@ describe('GuidedTourService', () => {
       // findById is called again after update to return fresh data
       mockTourRepository.findOne.mockResolvedValue({ ...existingTour, ...updateDto });
 
-      const result = await service.update('tour-uuid-1234', updateDto, orgId);
+      const result = await service.update('tour-uuid-1234', updateDto, orgId, adminActor);
 
       expect(result.name).toBe('Updated Name');
       expect(mockTourRepository.save).toHaveBeenCalled();
@@ -363,7 +469,7 @@ describe('GuidedTourService', () => {
       mockStepRepository.create.mockImplementation((data) => data);
       mockStepRepository.save.mockResolvedValue([]);
 
-      await service.update('tour-uuid-1234', updateDto, orgId);
+      await service.update('tour-uuid-1234', updateDto, orgId, adminActor);
 
       expect(mockStepRepository.delete).toHaveBeenCalledWith({ tourId: 'tour-uuid-1234' });
       expect(mockStepRepository.create).toHaveBeenCalledTimes(2);
@@ -383,7 +489,7 @@ describe('GuidedTourService', () => {
       mockTourRepository.findOne.mockResolvedValue(existingTour);
       mockTourRepository.save.mockResolvedValue(existingTour);
 
-      await service.update('tour-uuid-1234', updateDto, orgId);
+      await service.update('tour-uuid-1234', updateDto, orgId, adminActor);
 
       expect(existingTour.triggerConditions).toEqual({
         minTimeOnPage: 30,
@@ -395,17 +501,141 @@ describe('GuidedTourService', () => {
       mockTourRepository.findOne.mockResolvedValue(null);
 
       await expect(
-        service.update('nonexistent', { name: 'x' }, orgId),
+        service.update('nonexistent', { name: 'x' }, orgId, adminActor),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject DEVELOPER updates on sdk lab template tours', async () => {
+      const existingTour = { ...mockLabTourEntity, steps: [mockStepEntity] };
+      const updateDto: UpdateGuidedTourDto = {
+        name: 'Lab tour renamed',
+        description: 'Lab description',
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(existingTour);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      await expect(
+        service.update('tour-uuid-1234', updateDto, orgId, developerActor),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject DEVELOPER updates to forbidden lab tour fields', async () => {
+      mockTourRepository.findOne.mockResolvedValue({ ...mockLabTourEntity, steps: [mockStepEntity] });
+
+      await expect(
+        service.update('tour-uuid-1234', { targetUrl: '/dashboard/users' }, orgId, developerActor),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.update('tour-uuid-1234', { priority: 999 }, orgId, developerActor),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should set sandboxTestStartedBy when developer activates sandbox tour via update', async () => {
+      const sandboxTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        isActive: false,
+        sandboxTestStartedBy: null,
+        createdBy: userId,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(sandboxTour);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      const result = await service.update(
+        'tour-uuid-1234',
+        { isActive: true },
+        orgId,
+        { ...developerActor, id: userId },
+      );
+
+      expect(result.isActive).toBe(true);
+      expect(result.sandboxTestStartedBy).toBe(userId);
+    });
+
+    it('should keep sandboxStatus approved when admin moves tour from production to sandbox', async () => {
+      const prodTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.PRODUCTION,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(prodTour);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      const result = await service.update(
+        'tour-uuid-1234',
+        { environment: TourEnvironment.SANDBOX },
+        orgId,
+        adminActor,
+      );
+
+      expect(result.environment).toBe(TourEnvironment.SANDBOX);
+      expect(result.sandboxStatus).toBe(TourSandboxStatus.APPROVED);
+    });
+
+    it('should reject admin promotion to production while sandbox tour is rejected', async () => {
+      const rejectedTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.REJECTED,
+        sandboxRejectionReason: 'Sélecteurs instables',
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(rejectedTour);
+
+      await expect(
+        service.update(
+          'tour-uuid-1234',
+          { environment: TourEnvironment.PRODUCTION },
+          orgId,
+          adminActor,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should keep rejected sandbox tour rejected on developer save until manual re-assign', async () => {
+      const rejectedTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.REJECTED,
+        sandboxRejectionReason: 'Selectors invalides',
+        sandboxRejectedAt: new Date('2026-06-01T10:00:00.000Z'),
+        sandboxRejectedBy: 'admin-id',
+        assignedAdminIds: ['admin-id'],
+        createdBy: userId,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(rejectedTour);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      const result = await service.update(
+        'tour-uuid-1234',
+        { name: 'Parcours corrigé' },
+        orgId,
+        { ...developerActor, id: userId },
+      );
+
+      expect(result.sandboxStatus).toBe(TourSandboxStatus.REJECTED);
+      expect(result.sandboxRejectionReason).toBe('Selectors invalides');
+      expect(result.sandboxRejectedAt).toEqual(new Date('2026-06-01T10:00:00.000Z'));
+      expect(result.sandboxRejectedBy).toBe('admin-id');
     });
   });
 
   // ─────────────────────────────────────────────
   describe('delete', () => {
     it('should hard-delete a tour', async () => {
+      mockTourRepository.findOne.mockResolvedValue({ ...mockTourEntity, steps: [mockStepEntity] });
       mockTourRepository.delete.mockResolvedValue({ affected: 1 });
 
-      await service.delete('tour-uuid-1234', orgId);
+      await service.delete('tour-uuid-1234', orgId, adminActor);
 
       expect(mockTourRepository.delete).toHaveBeenCalledWith({
         id: 'tour-uuid-1234',
@@ -414,11 +644,28 @@ describe('GuidedTourService', () => {
     });
 
     it('should throw NotFoundException when deleting nonexistent tour', async () => {
-      mockTourRepository.delete.mockResolvedValue({ affected: 0 });
+      mockTourRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.delete('nonexistent', orgId)).rejects.toThrow(
+      await expect(service.delete('nonexistent', orgId, adminActor)).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should forbid developer delete after moderation submission', async () => {
+      mockTourRepository.findOne.mockResolvedValue({
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.RETURNED,
+        assignedAdminIds: ['admin-id'],
+        assignedToAdminsAt: new Date('2026-06-05T10:00:00.000Z'),
+        sandboxRejectedBy: 'admin-id',
+        steps: [mockStepEntity],
+      });
+
+      await expect(service.delete('tour-uuid-1234', orgId, developerActor)).rejects.toThrow(
+        'Ce parcours a été soumis à la modération',
+      );
+      expect(mockTourRepository.delete).not.toHaveBeenCalled();
     });
   });
 
@@ -430,7 +677,7 @@ describe('GuidedTourService', () => {
       mockTourRepository.findOne.mockResolvedValue(inactiveTour);
       mockTourRepository.save.mockResolvedValue({ ...inactiveTour, isActive: true });
 
-      const result = await service.toggleActive('tour-uuid-1234', orgId, true);
+      const result = await service.toggleActive('tour-uuid-1234', orgId, true, adminActor);
 
       expect(result.isActive).toBe(true);
     });
@@ -441,7 +688,7 @@ describe('GuidedTourService', () => {
       mockTourRepository.findOne.mockResolvedValue(activeTour);
       mockTourRepository.save.mockResolvedValue({ ...activeTour, isActive: false });
 
-      const result = await service.toggleActive('tour-uuid-1234', orgId, false);
+      const result = await service.toggleActive('tour-uuid-1234', orgId, false, adminActor);
 
       expect(result.isActive).toBe(false);
     });
@@ -450,36 +697,145 @@ describe('GuidedTourService', () => {
       mockTourRepository.findOne.mockResolvedValue(null);
 
       await expect(
-        service.toggleActive('nonexistent', orgId, true),
+        service.toggleActive('nonexistent', orgId, true, adminActor),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('clears sandbox user states when sandbox test is deactivated on production tour', async () => {
+      const tour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.PRODUCTION,
+        isSandboxTestActive: true,
+        sandboxTestStartedBy: userId,
+        isActive: false,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(tour);
+      mockTourRepository.save.mockResolvedValue({ ...tour, isSandboxTestActive: false });
+      mockTourUserStateRepository.delete.mockResolvedValue({ affected: 1 });
+
+      await service.toggleActive('tour-uuid-1234', orgId, false, adminActor, 'sandbox');
+
+      expect(mockTourUserStateRepository.delete).toHaveBeenCalledWith({
+        tourId: 'tour-uuid-1234',
+        organizationId: orgId,
+        environment: TourEnvironment.SANDBOX,
+      });
+      expect(mockTourRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isSandboxTestActive: false,
+          sandboxTestStartedBy: null,
+        }),
+      );
+    });
+
+    it('should allow developer to activate own sandbox tour for testing', async () => {
+      const sandboxTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        isActive: false,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue(sandboxTour);
+      mockTourRepository.save.mockResolvedValue({ ...sandboxTour, isActive: true });
+
+      const result = await service.toggleActive('tour-uuid-1234', orgId, true, {
+        ...developerActor,
+        id: userId,
+      });
+
+      expect(result.isActive).toBe(true);
+      expect(mockTourRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isActive: true,
+          sandboxTestStartedBy: userId,
+        }),
+      );
     });
   });
 
   // ─────────────────────────────────────────────
   describe('findActiveToursForUrl', () => {
-    it('should return active tours matching a URL', async () => {
-      mockTourRepository.find.mockResolvedValue([mockTourEntity]);
+    const buildQueryBuilder = (tours: typeof mockTourEntity[]) => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(tours),
+    });
+
+    it('should return only production active tours by default', async () => {
+      mockTourRepository.createQueryBuilder.mockReturnValue(buildQueryBuilder([mockTourEntity]));
 
       const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId);
 
       expect(result).toEqual([mockTourEntity]);
-      expect(mockTourRepository.find).toHaveBeenCalledWith({
-        where: {
-          organizationId: orgId,
-          targetUrl: '/dashboard/transfers',
-          isActive: true,
-        },
-        relations: ['steps'],
-        order: { priority: 'DESC' },
-      });
+      expect(mockTourRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
     });
 
-    it('should return empty array when no active tours match', async () => {
-      mockTourRepository.find.mockResolvedValue([]);
+    it('should include own sandbox tours for developer runtime context', async () => {
+      const sandboxTour = {
+        ...mockTourEntity,
+        id: 'sandbox-tour-id',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        sandboxTestStartedBy: userId,
+      };
 
-      const result = await service.findActiveToursForUrl('/nonexistent', orgId);
+      mockTourRepository.createQueryBuilder
+        .mockReturnValueOnce(buildQueryBuilder([mockTourEntity]))
+        .mockReturnValueOnce(buildQueryBuilder([sandboxTour]))
+        .mockReturnValueOnce(buildQueryBuilder([]));
 
-      expect(result).toEqual([]);
+      const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId, userId, {
+        userId,
+        userRole: UserRole.DEVELOPER,
+        authMethod: 'jwt',
+      });
+
+      expect(result).toEqual([mockTourEntity, sandboxTour]);
+      expect(mockTourRepository.createQueryBuilder).toHaveBeenCalledTimes(3);
+    });
+
+    it('should not include sandbox tours without sandbox runtime permission', async () => {
+      mockTourRepository.createQueryBuilder.mockReturnValue(buildQueryBuilder([mockTourEntity]));
+
+      const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId, userId, {
+        userId,
+        userRole: UserRole.USER,
+        authMethod: 'jwt',
+      });
+
+      expect(result).toEqual([mockTourEntity]);
+      expect(mockTourRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
+    });
+
+    it('should hide sandbox test production tours from non-launcher developer', async () => {
+      const approvedTourSandboxTest = {
+        ...mockTourEntity,
+        id: 'approved-sandbox-test',
+        environment: TourEnvironment.PRODUCTION,
+        isActive: true,
+        isSandboxTestActive: true,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        sandboxTestStartedBy: 'admin-id',
+      };
+
+      mockTourRepository.createQueryBuilder
+        .mockReturnValueOnce(buildQueryBuilder([mockTourEntity]))
+        .mockReturnValueOnce(buildQueryBuilder([]))
+        .mockReturnValueOnce(buildQueryBuilder([approvedTourSandboxTest]));
+
+      const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId, userId, {
+        userId,
+        userRole: UserRole.DEVELOPER,
+        authMethod: 'jwt',
+      });
+
+      expect(result).toEqual([mockTourEntity]);
     });
   });
 
@@ -566,9 +922,10 @@ describe('GuidedTourService', () => {
       expect(createSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip duplicated signature for same route and intent', async () => {
+    it('should skip duplicated signature for same route and intent from the same publisher', async () => {
       const existingTour = {
         ...mockTourEntity,
+        createdBy: userId,
         targetUrl: '/dashboard/sdk-tests/simple',
         triggerConditions: {
           contextualEngine: {
@@ -615,6 +972,59 @@ describe('GuidedTourService', () => {
       expect(result.created).toBe(0);
       expect(createSpy).not.toHaveBeenCalled();
       expect(result.details[0].reasons).toContain('duplicate_signature');
+    });
+
+    it('should allow duplicated lab signature for another publisher in the same organization', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        createdBy: 'other-user-id',
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          contextualEngine: {
+            intent: 'discovery',
+            flowSignature: 'sig-duplicate',
+            version: 1,
+          },
+        },
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Duplicate draft for another account',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            intent: 'discovery',
+            confidence: 82,
+            score: 87,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-duplicate' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content 1',
+                targetSelector: '[data-tour-id="tour-simple-title"]',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content 2',
+                targetSelector: '[data-tour-id="tour-simple-cta"] button',
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({ ...mockTourEntity, id: 'new-lab-tour' } as GuidedTour);
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+
+      expect(result.skipped).toBe(0);
+      expect(result.created).toBe(1);
+      expect(createSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

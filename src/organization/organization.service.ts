@@ -1,4 +1,10 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from './entities/organization.entity';
@@ -7,12 +13,27 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationResponse } from './types/organization-response.type';
 import { User } from '../user/entities/user.entity';
 import { OrganizationWithUsers } from './types/organization-with-users.type';
+import {
+  AdminResourceEditLockInfo,
+  acquireAdminResourceEditLockAtomic,
+  assertAdminResourceDeleteBlockedWhileEditing,
+  assertAdminResourceEditLockHeldForSave,
+  assertCanAcquireAdminResourceEditLock,
+  buildAdminResourceEditLockConflictMessage,
+  buildAdminResourceEditLockInfo,
+  isAdminResourceEditLockExpired,
+  isAdminResourceEditLockHeldBy,
+  organizationAdminEditRequiresLock,
+  renewAdminResourceEditLockAtomic,
+} from '../common/admin-resource-edit-lock.util';
 
 @Injectable()
 export class OrganizationService {
   constructor(
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   private sanitizeUser(user: User): Partial<User> {
@@ -25,7 +46,35 @@ export class OrganizationService {
     return users.map(user => this.sanitizeUser(user));
   }
 
-  private toOrganizationResponse(org: Organization): OrganizationResponse {
+  private async loadHolderDisplayName(userId?: string | null): Promise<string | undefined> {
+    if (!userId) {
+      return undefined;
+    }
+    const holder = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'firstName', 'lastName', 'email'],
+    });
+    if (!holder) {
+      return undefined;
+    }
+    const name = `${holder.firstName ?? ''} ${holder.lastName ?? ''}`.trim();
+    return name || holder.email;
+  }
+
+  private async attachEditLockToOrganization(
+    org: Organization,
+    actorId?: string,
+  ): Promise<OrganizationResponse> {
+    const required = organizationAdminEditRequiresLock();
+    const holderDisplayName = org.editLockedBy
+      ? await this.loadHolderDisplayName(org.editLockedBy)
+      : undefined;
+    const editLock = buildAdminResourceEditLockInfo(
+      org,
+      required,
+      actorId,
+      holderDisplayName,
+    );
     return {
       id: org.id,
       name: org.name,
@@ -38,7 +87,54 @@ export class OrganizationService {
       isActive: org.isActive,
       createdAt: org.createdAt,
       updatedAt: org.updatedAt,
+      editLock,
     };
+  }
+
+  private toOrganizationResponse(org: Organization, actorId?: string): OrganizationResponse {
+    const required = organizationAdminEditRequiresLock();
+    const editLock = buildAdminResourceEditLockInfo(org, required, actorId);
+    return {
+      id: org.id,
+      name: org.name,
+      apiKey: org.apiKey,
+      plan: org.plan,
+      domain: org.domain,
+      settings: org.settings,
+      maxTours: org.maxTours,
+      maxUsers: org.maxUsers,
+      isActive: org.isActive,
+      createdAt: org.createdAt,
+      updatedAt: org.updatedAt,
+      editLock,
+    };
+  }
+
+  private async findOrganizationEntityOrThrow(id: string): Promise<Organization> {
+    const organization = await this.organizationRepository.findOne({ where: { id } });
+    if (!organization) {
+      throw new NotFoundException('Organisation introuvable');
+    }
+    return organization;
+  }
+
+  private async assertOrganizationEditLockForMutation(
+    organization: Organization,
+    actorId?: string,
+  ): Promise<void> {
+    if (!organizationAdminEditRequiresLock()) {
+      return;
+    }
+    const holderDisplayName = organization.editLockedBy
+      ? await this.loadHolderDisplayName(organization.editLockedBy)
+      : undefined;
+    assertAdminResourceEditLockHeldForSave(
+      organization,
+      true,
+      'organisation',
+      actorId,
+      holderDisplayName,
+    );
   }
 
   // Créer une organisation
@@ -59,16 +155,18 @@ export class OrganizationService {
   }
 
   // Récupérer toutes les organisations
-  async findAll(): Promise<OrganizationResponse[]> {
+  async findAll(actorId?: string): Promise<OrganizationResponse[]> {
     const organizations = await this.organizationRepository.find({
       order: { createdAt: 'DESC' },
     });
 
-    return organizations.map(org => this.toOrganizationResponse(org));
+    return Promise.all(
+      organizations.map((org) => this.attachEditLockToOrganization(org, actorId)),
+    );
   }
 
   // Récupérer une organisation par ID
-  async findById(id: string): Promise<OrganizationResponse> {
+  async findById(id: string, actorId?: string): Promise<OrganizationResponse> {
     const organization = await this.organizationRepository.findOne({
       where: { id },
     });
@@ -77,7 +175,7 @@ export class OrganizationService {
       throw new NotFoundException('Organisation introuvable');
     }
 
-    return this.toOrganizationResponse(organization);
+    return this.attachEditLockToOrganization(organization, actorId);
   }
 
   // Récupérer une organisation par API Key
@@ -116,12 +214,13 @@ export class OrganizationService {
   }
 
   // Mettre à jour une organisation
-  async update(id: string, updateOrganizationDto: UpdateOrganizationDto): Promise<OrganizationResponse> {
-    const organization = await this.organizationRepository.findOne({ where: { id } });
-
-    if (!organization) {
-      throw new NotFoundException('Organisation introuvable');
-    }
+  async update(
+    id: string,
+    updateOrganizationDto: UpdateOrganizationDto,
+    actorId?: string,
+  ): Promise<OrganizationResponse> {
+    const organization = await this.findOrganizationEntityOrThrow(id);
+    await this.assertOrganizationEditLockForMutation(organization, actorId);
 
     // Vérifier l'apiKey unique si changement
     if (updateOrganizationDto.apiKey && updateOrganizationDto.apiKey !== organization.apiKey) {
@@ -138,18 +237,92 @@ export class OrganizationService {
     Object.assign(organization, updateOrganizationDto);
     const updatedOrg = await this.organizationRepository.save(organization);
 
-    return this.toOrganizationResponse(updatedOrg);
+    return this.attachEditLockToOrganization(updatedOrg, actorId);
   }
 
   // Supprimer une organisation
-  async delete(id: string): Promise<void> {
-    const organization = await this.organizationRepository.findOne({ where: { id } });
-
-    if (!organization) {
-      throw new NotFoundException('Organisation introuvable');
-    }
+  async delete(id: string, actorId?: string): Promise<void> {
+    const organization = await this.findOrganizationEntityOrThrow(id);
+    const holderDisplayName = organization.editLockedBy
+      ? await this.loadHolderDisplayName(organization.editLockedBy)
+      : undefined;
+    assertAdminResourceDeleteBlockedWhileEditing(
+      organization,
+      'organisation',
+      actorId,
+      holderDisplayName,
+    );
 
     await this.organizationRepository.remove(organization);
+  }
+
+  async acquireOrganizationEditLock(
+    id: string,
+    actorId: string,
+  ): Promise<{ organization: OrganizationResponse; editLock: AdminResourceEditLockInfo }> {
+    assertCanAcquireAdminResourceEditLock(actorId);
+    await this.findOrganizationEntityOrThrow(id);
+
+    const acquireResult = await this.organizationRepository.manager.transaction((manager) =>
+      acquireAdminResourceEditLockAtomic(manager, Organization, id, actorId),
+    );
+
+    if (acquireResult === 'acquired') {
+      const refreshed = await this.findOrganizationEntityOrThrow(id);
+      const response = await this.attachEditLockToOrganization(refreshed, actorId);
+      return { organization: response, editLock: response.editLock! };
+    }
+
+    const locked = await this.findOrganizationEntityOrThrow(id);
+    const holderDisplayName = await this.loadHolderDisplayName(locked.editLockedBy!);
+    const editLock = buildAdminResourceEditLockInfo(locked, true, actorId, holderDisplayName);
+    throw new ConflictException({
+      message: buildAdminResourceEditLockConflictMessage('organisation', holderDisplayName),
+      editLock,
+    });
+  }
+
+  async renewOrganizationEditLock(
+    id: string,
+    actorId: string,
+  ): Promise<{ organization: OrganizationResponse; editLock: AdminResourceEditLockInfo }> {
+    assertCanAcquireAdminResourceEditLock(actorId);
+
+    const refreshed = await this.organizationRepository.manager.transaction((manager) =>
+      renewAdminResourceEditLockAtomic(manager, Organization, id, actorId),
+    );
+
+    if (!isAdminResourceEditLockHeldBy(refreshed, actorId)) {
+      const holderDisplayName = refreshed.editLockedBy
+        ? await this.loadHolderDisplayName(refreshed.editLockedBy)
+        : undefined;
+      throw new ConflictException({
+        message: buildAdminResourceEditLockConflictMessage('organisation', holderDisplayName),
+        editLock: buildAdminResourceEditLockInfo(refreshed, true, actorId, holderDisplayName),
+      });
+    }
+
+    const response = await this.attachEditLockToOrganization(refreshed, actorId);
+    return { organization: response, editLock: response.editLock! };
+  }
+
+  async releaseOrganizationEditLock(id: string, actorId?: string): Promise<void> {
+    const organization = await this.organizationRepository.findOne({ where: { id } });
+    if (!organization?.editLockedBy) {
+      return;
+    }
+    if (
+      organization.editLockedBy !== actorId &&
+      !isAdminResourceEditLockExpired(organization.editLockExpiresAt)
+    ) {
+      return;
+    }
+    await this.organizationRepository.save({
+      id: organization.id,
+      editLockedBy: null,
+      editLockedAt: null,
+      editLockExpiresAt: null,
+    });
   }
 
   // Compter le nombre d'utilisateurs ACTIFS dans une organisation

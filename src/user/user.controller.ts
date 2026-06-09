@@ -64,8 +64,8 @@ export class UserController {
     error: 'Forbidden',
     statusCode: 403
   }})      
-  async findAll() {
-    const users = await this.userService.findAll();
+  async findAll(@CurrentUser() currentUser: { id: string }) {
+    const users = await this.userService.findAll(currentUser.id);
     return {
       success: true,
       count: users.length,
@@ -238,10 +238,60 @@ export class UserController {
       );
     }
 
-    const user = await this.userService.findById(id);
+    const user = await this.userService.findById(id, currentUser.id);
     return {
       success: true,
       user,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/edit-lock/acquire')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Acquire user edit lock (ADMIN)' })
+  async acquireEditLock(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    const result = await this.userService.acquireUserEditLock(id, currentUser.id);
+    return {
+      success: true,
+      user: result.user,
+      editLock: result.editLock,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/edit-lock/renew')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Renew user edit lock (ADMIN)' })
+  async renewEditLock(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    const result = await this.userService.renewUserEditLock(id, currentUser.id);
+    return {
+      success: true,
+      user: result.user,
+      editLock: result.editLock,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Delete(':id/edit-lock')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Release user edit lock (ADMIN)' })
+  async releaseEditLock(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    await this.userService.releaseUserEditLock(id, currentUser.id);
+    return {
+      success: true,
+      message: 'Verrou d’édition libéré',
     };
   }
 
@@ -303,7 +353,7 @@ export class UserController {
       );
     }
 
-    const user = await this.userService.update(id, updateUserDto);
+    const user = await this.userService.update(id, updateUserDto, currentUser.id);
     return {
       success: true,
       message: 'Utilisateur mis à jour avec succès',
@@ -339,8 +389,11 @@ export class UserController {
     error: 'Not Found',
     statusCode: 404,
   }})
-  async delete(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.userService.delete(id);
+  async delete(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    await this.userService.delete(id, currentUser.id);
     return {
       success: true,
       message: 'Utilisateur supprimé avec succès',
@@ -404,8 +457,13 @@ export class UserController {
   async assignToOrganization(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('organizationName') organizationName: string,
+    @CurrentUser() currentUser: { id: string },
   ) {
-    const user = await this.userService.assignToOrganization(id, organizationName);
+    const user = await this.userService.assignToOrganization(
+      id,
+      organizationName,
+      currentUser.id,
+    );
     return {
       success: true,
       message: 'Utilisateur assigné à l\'organisation avec succès',
@@ -452,8 +510,11 @@ export class UserController {
     error: 'Not Found',
     statusCode: 404,
   }})
-  async removeFromOrganization(@Param('id', ParseUUIDPipe) id: string) {
-    const user = await this.userService.removeFromOrganization(id);
+  async removeFromOrganization(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    const user = await this.userService.removeFromOrganization(id, currentUser.id);
     return {
       success: true,
       message: 'Utilisateur retiré de l\'organisation avec succès',

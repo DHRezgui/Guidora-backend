@@ -194,7 +194,9 @@ describe('GuidedTourController', () => {
       });
       expect(service.findAllByOrganization).toHaveBeenCalledWith(
         mockCurrentUser.organizationId,
+        mockCurrentUser,
         undefined,
+        true,
       );
     });
 
@@ -206,6 +208,8 @@ describe('GuidedTourController', () => {
       expect(result.count).toBe(1);
       expect(service.findAllByOrganization).toHaveBeenCalledWith(
         mockCurrentUser.organizationId,
+        mockCurrentUser,
+        true,
         true,
       );
     });
@@ -271,6 +275,7 @@ describe('GuidedTourController', () => {
         payload,
         mockCurrentUser.organizationId,
         mockCurrentUser.id,
+        mockCurrentUser,
       );
     });
   });

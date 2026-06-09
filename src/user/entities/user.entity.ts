@@ -1,6 +1,7 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, BeforeInsert, BeforeUpdate, JoinColumn, ManyToOne } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { Organization } from '../../organization/entities/organization.entity';
+import type { AdminResourceEditLockInfo } from '../../common/admin-resource-edit-lock.util';
 
 export enum UserRole {
   ADMIN = 'ADMIN',
@@ -66,7 +67,17 @@ export class User {
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt: Date;
 
-  
+  @Column({ type: 'uuid', name: 'edit_locked_by', nullable: true })
+  editLockedBy: string | null;
+
+  @Column({ type: 'timestamptz', name: 'edit_locked_at', nullable: true })
+  editLockedAt: Date | null;
+
+  @Column({ type: 'timestamptz', name: 'edit_lock_expires_at', nullable: true })
+  editLockExpiresAt: Date | null;
+
+  editLock?: AdminResourceEditLockInfo;
+
   @BeforeInsert()
   @BeforeUpdate()
   async hashPassword() {

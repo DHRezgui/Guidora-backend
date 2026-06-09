@@ -18,7 +18,12 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { ApiAuth } from '../swagger/security-schemas';
-import { error } from 'console';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import {
+  assertDeveloperOrganizationAccess,
+  getDeveloperOrganizationId,
+  shouldListAllOrganizations,
+} from './organization-access.util';
 
 @Controller('organization')
 export class OrganizationController {
@@ -78,7 +83,7 @@ export class OrganizationController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
     summary: 'List organizations',
-    description: 'Returns all organizations (ADMIN: all / DEVELOPER: read-only)'
+    description: 'Returns all organizations (ADMIN) or the developer\'s own organization only (DEVELOPER, read-only)',
   })
   @ApiResponse({ 
     status: 200, 
@@ -129,12 +134,32 @@ export class OrganizationController {
     error: 'Forbidden',
     statusCode: 403
   }})         
-  async findAll() {
-    const organizations = await this.organizationService.findAll();
+  async findAll(
+    @CurrentUser() currentUser: { id?: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    if (shouldListAllOrganizations(currentUser)) {
+      const organizations = await this.organizationService.findAll(currentUser.id);
+      return {
+        success: true,
+        count: organizations.length,
+        organizations,
+      };
+    }
+
+    const developerOrgId = getDeveloperOrganizationId(currentUser);
+    if (!developerOrgId) {
+      return {
+        success: true,
+        count: 0,
+        organizations: [],
+      };
+    }
+
+    const organization = await this.organizationService.findById(developerOrgId, currentUser.id);
     return {
       success: true,
-      count: organizations.length,
-      organizations,
+      count: 1,
+      organizations: [organization],
     };
   }
 
@@ -180,11 +205,71 @@ export class OrganizationController {
     error: 'Forbidden',
     statusCode: 403
   }})
-  async findById(@Param('id', ParseUUIDPipe) id: string) {
-    const organization = await this.organizationService.findById(id);
+  async findById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id?: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    assertDeveloperOrganizationAccess(currentUser, id);
+    const organization = await this.organizationService.findById(id, currentUser.id);
     return {
       success: true,
       organization,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/edit-lock/acquire')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Acquire organization edit lock (ADMIN)' })
+  async acquireEditLock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    const result = await this.organizationService.acquireOrganizationEditLock(
+      id,
+      currentUser.id,
+    );
+    return {
+      success: true,
+      organization: result.organization,
+      editLock: result.editLock,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post(':id/edit-lock/renew')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Renew organization edit lock (ADMIN)' })
+  async renewEditLock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    const result = await this.organizationService.renewOrganizationEditLock(
+      id,
+      currentUser.id,
+    );
+    return {
+      success: true,
+      organization: result.organization,
+      editLock: result.editLock,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Delete(':id/edit-lock')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({ summary: 'Release organization edit lock (ADMIN)' })
+  async releaseEditLock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    await this.organizationService.releaseOrganizationEditLock(id, currentUser.id);
+    return {
+      success: true,
+      message: 'Verrou d’édition libéré',
     };
   }
 
@@ -247,7 +332,11 @@ export class OrganizationController {
     error: 'Not Found',
     statusCode: 404,
   }})
-  async findByIdWithUsers(@Param('id', ParseUUIDPipe) id: string): Promise<{ success: boolean; organization: OrganizationWithUsers }> {
+  async findByIdWithUsers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { role?: UserRole; organizationId?: string | null },
+  ): Promise<{ success: boolean; organization: OrganizationWithUsers }> {
+    assertDeveloperOrganizationAccess(currentUser, id);
     const organization = await this.organizationService.findByIdWithUsers(id);
     return {
       success: true,
@@ -285,7 +374,11 @@ export class OrganizationController {
     error: 'Not Found',
     statusCode: 404,
   }})
-  async countUsers(@Param('id', ParseUUIDPipe) id: string) {
+  async countUsers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertDeveloperOrganizationAccess(currentUser, id);
     const count = await this.organizationService.countUsers(id);
     return {
       success: true,
@@ -329,8 +422,13 @@ export class OrganizationController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateOrganizationDto: UpdateOrganizationDto,
+    @CurrentUser() currentUser: { id: string },
   ) {
-    const organization = await this.organizationService.update(id, updateOrganizationDto);
+    const organization = await this.organizationService.update(
+      id,
+      updateOrganizationDto,
+      currentUser.id,
+    );
     return {
       success: true,
       message: 'Organisation mise à jour avec succès',
@@ -359,8 +457,11 @@ export class OrganizationController {
     error: 'Not Found',
     statusCode: 404,
   }})
-  async delete(@Param('id', ParseUUIDPipe) id: string) {
-    await this.organizationService.delete(id);
+  async delete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() currentUser: { id: string },
+  ) {
+    await this.organizationService.delete(id, currentUser.id);
     return {
       success: true,
       message: 'Organisation supprimée avec succès',

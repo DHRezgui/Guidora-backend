@@ -5,7 +5,8 @@ import { OrganizationService } from './organization.service';
 import { PlanType } from './entities/organization.entity';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { UserRole } from '../user/entities/user.entity';
 
 describe('OrganizationController', () => {
   let controller: OrganizationController;
@@ -35,6 +36,16 @@ describe('OrganizationController', () => {
     isActive: true,
     createdAt: new Date('2026-02-04T10:00:00.000Z'),
     updatedAt: new Date('2026-02-04T10:00:00.000Z'),
+  };
+
+  const mockAdminUser = {
+    role: UserRole.ADMIN,
+    organizationId: null,
+  };
+
+  const mockDeveloperUser = {
+    role: UserRole.DEVELOPER,
+    organizationId: mockOrganizationResponse.id,
   };
 
   const mockOrganizationWithUsers = {
@@ -112,7 +123,7 @@ describe('OrganizationController', () => {
 
       mockOrganizationService.findAll.mockResolvedValue(organizations);
 
-      const result = await controller.findAll();
+      const result = await controller.findAll(mockAdminUser);
 
       expect(result).toEqual({
         success: true,
@@ -126,13 +137,41 @@ describe('OrganizationController', () => {
     it('should return empty array when no organizations exist', async () => {
       mockOrganizationService.findAll.mockResolvedValue([]);
 
-      const result = await controller.findAll();
+      const result = await controller.findAll(mockAdminUser);
 
       expect(result).toEqual({
         success: true,
         count: 0,
         organizations: [],
       });
+    });
+    it('should return only the developer organization for DEVELOPER', async () => {
+      mockOrganizationService.findById.mockResolvedValue(mockOrganizationResponse);
+
+      const result = await controller.findAll(mockDeveloperUser);
+
+      expect(result).toEqual({
+        success: true,
+        count: 1,
+        organizations: [mockOrganizationResponse],
+      });
+      expect(service.findById).toHaveBeenCalledWith(mockOrganizationResponse.id);
+      expect(service.findAll).not.toHaveBeenCalled();
+    });
+
+    it('should return empty array when DEVELOPER has no organization', async () => {
+      const result = await controller.findAll({
+        role: UserRole.DEVELOPER,
+        organizationId: null,
+      });
+
+      expect(result).toEqual({
+        success: true,
+        count: 0,
+        organizations: [],
+      });
+      expect(service.findAll).not.toHaveBeenCalled();
+      expect(service.findById).not.toHaveBeenCalled();
     });
   });
 
@@ -142,7 +181,7 @@ describe('OrganizationController', () => {
 
       mockOrganizationService.findById.mockResolvedValue(mockOrganizationResponse);
 
-      const result = await controller.findById(orgId);
+      const result = await controller.findById(orgId, mockAdminUser);
 
       expect(result).toEqual({
         success: true,
@@ -159,9 +198,16 @@ describe('OrganizationController', () => {
         new NotFoundException('Organisation introuvable'),
       );
 
-      await expect(controller.findById(orgId)).rejects.toThrow(
+      await expect(controller.findById(orgId, mockAdminUser)).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should forbid DEVELOPER from viewing another organization', async () => {
+      await expect(
+        controller.findById('other-org-id', mockDeveloperUser),
+      ).rejects.toThrow(ForbiddenException);
+      expect(service.findById).not.toHaveBeenCalled();
     });
   });
 
@@ -173,7 +219,7 @@ describe('OrganizationController', () => {
         mockOrganizationWithUsers,
       );
 
-      const result = await controller.findByIdWithUsers(orgId);
+      const result = await controller.findByIdWithUsers(orgId, mockAdminUser);
 
       expect(result).toEqual({
         success: true,
@@ -196,7 +242,7 @@ describe('OrganizationController', () => {
         orgWithoutUsers,
       );
 
-      const result = await controller.findByIdWithUsers(orgId);
+      const result = await controller.findByIdWithUsers(orgId, mockAdminUser);
 
       expect(result.organization.userCount).toBe(0);
       expect(result.organization.users).toHaveLength(0);
@@ -208,7 +254,7 @@ describe('OrganizationController', () => {
       const orgId = '123e4567-e89b-12d3-a456-426614174000';
       mockOrganizationService.countUsers.mockResolvedValue(5);
 
-      const result = await controller.countUsers(orgId);
+      const result = await controller.countUsers(orgId, mockAdminUser);
 
       expect(result).toEqual({
         success: true,
@@ -221,7 +267,7 @@ describe('OrganizationController', () => {
       const orgId = '123e4567-e89b-12d3-a456-426614174000';
       mockOrganizationService.countUsers.mockResolvedValue(0);
 
-      const result = await controller.countUsers(orgId);
+      const result = await controller.countUsers(orgId, mockAdminUser);
 
       expect(result.count).toBe(0);
     });

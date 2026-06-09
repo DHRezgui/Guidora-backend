@@ -1,3 +1,4 @@
+import type { AdminResourceEditLockInfo } from '../../common/admin-resource-edit-lock.util';
 import { UserRole } from '../entities/user.entity';
 
 export interface UserResponse {
@@ -12,4 +13,5 @@ export interface UserResponse {
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  editLock?: AdminResourceEditLockInfo;
 }

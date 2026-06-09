@@ -1,4 +1,10 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
@@ -7,6 +13,19 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
 import { UserResponse } from './types/user-response.type';
 import { OrganizationService } from '../organization/organization.service';
+import {
+  AdminResourceEditLockInfo,
+  acquireAdminResourceEditLockAtomic,
+  assertAdminResourceDeleteBlockedWhileEditing,
+  assertAdminResourceEditLockHeldForSave,
+  assertCanAcquireAdminResourceEditLock,
+  buildAdminResourceEditLockConflictMessage,
+  buildAdminResourceEditLockInfo,
+  isAdminResourceEditLockExpired,
+  isAdminResourceEditLockHeldBy,
+  renewAdminResourceEditLockAtomic,
+  userAdminEditRequiresLock,
+} from '../common/admin-resource-edit-lock.util';
 
 @Injectable()
 export class UserService {
@@ -17,7 +36,35 @@ export class UserService {
   ) {}
 
 
-  private toUserResponse(user: User): UserResponse {
+  private async loadHolderDisplayName(userId?: string | null): Promise<string | undefined> {
+    if (!userId) {
+      return undefined;
+    }
+    const holder = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'firstName', 'lastName', 'email'],
+    });
+    if (!holder) {
+      return undefined;
+    }
+    const name = `${holder.firstName ?? ''} ${holder.lastName ?? ''}`.trim();
+    return name || holder.email;
+  }
+
+  private async attachEditLockToUser(
+    user: User,
+    actorId?: string,
+  ): Promise<UserResponse> {
+    const required = userAdminEditRequiresLock(actorId, user.id);
+    const holderDisplayName = user.editLockedBy
+      ? await this.loadHolderDisplayName(user.editLockedBy)
+      : undefined;
+    const editLock = buildAdminResourceEditLockInfo(
+      user,
+      required,
+      actorId,
+      holderDisplayName,
+    );
     return {
       id: user.id,
       email: user.email,
@@ -30,7 +77,54 @@ export class UserService {
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      editLock,
     };
+  }
+
+  private toUserResponse(user: User, actorId?: string): UserResponse {
+    const required = userAdminEditRequiresLock(actorId, user.id);
+    const editLock = buildAdminResourceEditLockInfo(user, required, actorId);
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      organizationId: user.organizationId,
+      isActive: user.isActive,
+      emailVerified: user.emailVerified,
+      lastLoginAt: user.lastLoginAt,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      editLock,
+    };
+  }
+
+  private async findUserEntityOrThrow(id: string): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+    return user;
+  }
+
+  private async assertUserEditLockForMutation(
+    user: User,
+    actorId?: string,
+  ): Promise<void> {
+    if (!userAdminEditRequiresLock(actorId, user.id)) {
+      return;
+    }
+    const holderDisplayName = user.editLockedBy
+      ? await this.loadHolderDisplayName(user.editLockedBy)
+      : undefined;
+    assertAdminResourceEditLockHeldForSave(
+      user,
+      true,
+      'utilisateur',
+      actorId,
+      holderDisplayName,
+    );
   }
   
   // Register et gérer l'assignation 
@@ -84,25 +178,54 @@ export class UserService {
   }
 
   // Utilisateurs SANS password
-  async findAll(): Promise<UserResponse[]> {
+  async findAll(actorId?: string): Promise<UserResponse[]> {
     const users = await this.userRepository.find({
-      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'lastLoginAt'],
+      select: [
+        'id',
+        'email',
+        'firstName',
+        'lastName',
+        'role',
+        'organizationId',
+        'isActive',
+        'emailVerified',
+        'createdAt',
+        'lastLoginAt',
+        'editLockedBy',
+        'editLockedAt',
+        'editLockExpiresAt',
+      ],
     });
-    return users.map(user => this.toUserResponse(user));
+    return Promise.all(users.map((user) => this.attachEditLockToUser(user, actorId)));
   }
 
   // Utilisateur par ID SANS password
-  async findById(id: string): Promise<UserResponse> {
+  async findById(id: string, actorId?: string): Promise<UserResponse> {
     const user = await this.userRepository.findOne({
       where: { id },
-      select: ['id', 'email', 'firstName', 'lastName', 'role', 'organizationId', 'isActive', 'emailVerified', 'createdAt', 'updatedAt', 'lastLoginAt'],
+      select: [
+        'id',
+        'email',
+        'firstName',
+        'lastName',
+        'role',
+        'organizationId',
+        'isActive',
+        'emailVerified',
+        'createdAt',
+        'updatedAt',
+        'lastLoginAt',
+        'editLockedBy',
+        'editLockedAt',
+        'editLockExpiresAt',
+      ],
     });
 
     if (!user) {
       throw new NotFoundException('Utilisateur introuvable');
     }
 
-    return this.toUserResponse(user);
+    return this.attachEditLockToUser(user, actorId);
   }
 
   // Récupérer par email AVEC password (pour login uniquement)
@@ -121,12 +244,13 @@ export class UserService {
   }
 
   //  Mettre à jour avec validation et hashage du password
-  async update(id: string, updateUserDto: UpdateUserDto): Promise<UserResponse> {
-    const user = await this.userRepository.findOne({ where: { id } });
-
-    if (!user) {
-      throw new NotFoundException('Utilisateur introuvable');
-    }
+  async update(
+    id: string,
+    updateUserDto: UpdateUserDto,
+    actorId?: string,
+  ): Promise<UserResponse> {
+    const user = await this.findUserEntityOrThrow(id);
+    await this.assertUserEditLockForMutation(user, actorId);
 
     // Vérifier l'email unique si changement
     if (updateUserDto.email && updateUserDto.email !== user.email) {
@@ -153,18 +277,103 @@ export class UserService {
 
     const updatedUser = await this.userRepository.save(user);
 
-    return this.toUserResponse(updatedUser);
+    return this.attachEditLockToUser(updatedUser, actorId);
   }
 
   // Supprimer avec vérification
-  async delete(id: string): Promise<void> {
-    const user = await this.userRepository.findOne({ where: { id } });
-
-    if (!user) {
-      throw new NotFoundException('Utilisateur introuvable');
-    }
+  async delete(id: string, actorId?: string): Promise<void> {
+    const user = await this.findUserEntityOrThrow(id);
+    const holderDisplayName = user.editLockedBy
+      ? await this.loadHolderDisplayName(user.editLockedBy)
+      : undefined;
+    assertAdminResourceDeleteBlockedWhileEditing(
+      user,
+      'utilisateur',
+      actorId,
+      holderDisplayName,
+    );
 
     await this.userRepository.remove(user);
+  }
+
+  async acquireUserEditLock(
+    id: string,
+    actorId: string,
+  ): Promise<{ user: UserResponse; editLock: AdminResourceEditLockInfo }> {
+    assertCanAcquireAdminResourceEditLock(actorId);
+    const user = await this.findUserEntityOrThrow(id);
+
+    if (!userAdminEditRequiresLock(actorId, id)) {
+      const editLock = buildAdminResourceEditLockInfo(user, false, actorId);
+      return { user: await this.attachEditLockToUser(user, actorId), editLock };
+    }
+
+    const acquireResult = await this.userRepository.manager.transaction((manager) =>
+      acquireAdminResourceEditLockAtomic(manager, User, id, actorId),
+    );
+
+    if (acquireResult === 'acquired') {
+      const refreshed = await this.findUserEntityOrThrow(id);
+      const response = await this.attachEditLockToUser(refreshed, actorId);
+      return { user: response, editLock: response.editLock! };
+    }
+
+    const locked = await this.findUserEntityOrThrow(id);
+    const holderDisplayName = await this.loadHolderDisplayName(locked.editLockedBy!);
+    const editLock = buildAdminResourceEditLockInfo(locked, true, actorId, holderDisplayName);
+    throw new ConflictException({
+      message: buildAdminResourceEditLockConflictMessage('utilisateur', holderDisplayName),
+      editLock,
+    });
+  }
+
+  async renewUserEditLock(
+    id: string,
+    actorId: string,
+  ): Promise<{ user: UserResponse; editLock: AdminResourceEditLockInfo }> {
+    assertCanAcquireAdminResourceEditLock(actorId);
+
+    if (!userAdminEditRequiresLock(actorId, id)) {
+      const user = await this.findUserEntityOrThrow(id);
+      const editLock = buildAdminResourceEditLockInfo(user, false, actorId);
+      return { user: await this.attachEditLockToUser(user, actorId), editLock };
+    }
+
+    const refreshed = await this.userRepository.manager.transaction((manager) =>
+      renewAdminResourceEditLockAtomic(manager, User, id, actorId),
+    );
+
+    if (!isAdminResourceEditLockHeldBy(refreshed, actorId)) {
+      const holderDisplayName = refreshed.editLockedBy
+        ? await this.loadHolderDisplayName(refreshed.editLockedBy)
+        : undefined;
+      throw new ConflictException({
+        message: buildAdminResourceEditLockConflictMessage('utilisateur', holderDisplayName),
+        editLock: buildAdminResourceEditLockInfo(refreshed, true, actorId, holderDisplayName),
+      });
+    }
+
+    const response = await this.attachEditLockToUser(refreshed, actorId);
+    return { user: response, editLock: response.editLock! };
+  }
+
+  async releaseUserEditLock(id: string, actorId?: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user?.editLockedBy) {
+      return;
+    }
+    if (
+      user.editLockedBy !== actorId &&
+      !isAdminResourceEditLockExpired(user.editLockExpiresAt)
+    ) {
+      return;
+    }
+    await this.userRepository.save({
+      id: user.id,
+      editLockedBy: null,
+      editLockedAt: null,
+      editLockExpiresAt: null,
+    });
   }
 
   //  Valider le password (pour login)
@@ -234,12 +443,13 @@ export class UserService {
 
 
   // Assigner un utilisateur à une organisation
-  async assignToOrganization(userId: string, organizationName: string): Promise<UserResponse> {
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-
-    if (!user) {
-      throw new NotFoundException('Utilisateur introuvable');
-    }
+  async assignToOrganization(
+    userId: string,
+    organizationName: string,
+    actorId?: string,
+  ): Promise<UserResponse> {
+    const user = await this.findUserEntityOrThrow(userId);
+    await this.assertUserEditLockForMutation(user, actorId);
 
     // Trouver l'organisation par nom
     const organizations = await this.organizationService.findAll();
@@ -267,16 +477,13 @@ export class UserService {
     user.organizationId = organization.id;
     const updatedUser = await this.userRepository.save(user);
 
-    return this.toUserResponse(updatedUser);
+    return this.attachEditLockToUser(updatedUser, actorId);
   }
 
   // Désassigner un utilisateur d'une organisation
-  async removeFromOrganization(userId: string): Promise<UserResponse> {
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-
-    if (!user) {
-      throw new NotFoundException('Utilisateur introuvable');
-    }
+  async removeFromOrganization(userId: string, actorId?: string): Promise<UserResponse> {
+    const user = await this.findUserEntityOrThrow(userId);
+    await this.assertUserEditLockForMutation(user, actorId);
 
     if (!user.organizationId) {
       throw new HttpException(
@@ -289,7 +496,7 @@ export class UserService {
     user.organizationId = null;
     const updatedUser = await this.userRepository.save(user);
 
-    return this.toUserResponse(updatedUser);
+    return this.attachEditLockToUser(updatedUser, actorId);
   }
 
   // Désassigner tous les users d'une organisation (utile si l'org ferme)

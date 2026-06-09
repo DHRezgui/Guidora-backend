@@ -1,8 +1,15 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import * as path from 'path';
-import { GuidedTour, TourReplayPolicy } from './entities/guided-tour.entity';
+import { GuidedTour, TourEnvironment, TourReplayPolicy, TourSandboxStatus } from './entities/guided-tour.entity';
 import { TourUserState, TourUserStateStatus } from './entities/tour-user-state.entity';
 import { Step } from '../step/entities/step.entity';
 import { User } from '../user/entities/user.entity';
@@ -19,6 +26,81 @@ import {
 import { ActionType, PositionType, StepType } from '../step/enums/tour.enums';
 import { ContextualSemanticHintsRequestDto } from './dto/contextual-semantic-hints.dto';
 import { TourSemanticPythonWorkerService } from './tour-semantic-python-worker.service';
+import { UserRole } from '../user/entities/user.entity';
+import type { RequestAuthUser } from '../auth/types/request-auth-user.type';
+import {
+  isTourVisibleInActiveList,
+  resolveAudienceForUserStateMutation,
+} from './guided-tour-user-state.util';
+import { AssignTourAdminsDto } from './dto/assign-tour-admins.dto';
+import { TransferTourDeveloperDto } from './dto/transfer-tour-developer.dto';
+import { TransferProductionManagementDto } from './dto/transfer-production-management.dto';
+import { SetTourAccessGrantsDto } from './dto/set-tour-access-grants.dto';
+import {
+  GuidedTourAccessGrant,
+  TourAccessMode,
+} from './entities/guided-tour-access-grant.entity';
+import { GuidedTourDeveloperTransfer } from './entities/guided-tour-developer-transfer.entity';
+import {
+  assertCanExportTour,
+  assertCanForkTour,
+  assertCanDeleteTour,
+  assertCanMutateTourWithGrants,
+  canManageTourAccess,
+} from './guided-tour-access.util';
+import { buildTourExportPayload, type TourExportPayload } from './guided-tour-export.util';
+import {
+  assertCanModerateAssignedDeveloperTour,
+  assertCanViewTour,
+  canActorViewTour,
+  normalizeAssignedAdminIds,
+  hasDeveloperModerationSubmissionHistory,
+  resolveDedicatedModeratorAdminId,
+  shouldApplyDeveloperPrivacyOnCreate,
+  isTourSharingLockedByDeveloperApproval,
+  isAdminOriginatedProductionTour,
+  isAdminOriginatedTour,
+} from './guided-tour-visibility.util';
+import {
+  buildSdkLabPublishDedupeKey,
+  isSdkLabPublishScopedByCreator,
+} from './guided-tour-lab.util';
+import {
+  assertCanAdminTransferToProduction,
+  assertCanApproveSandboxTour,
+  assertCanMutateTour,
+  assertProductionTourStructuredUpdateAllowed,
+  assertCanReassignApprovedTourAdmins,
+  assertCanReopenApprovedDeveloperTour,
+  assertCanTransferApprovedDeveloperTour,
+  assertCanRejectSandboxTour,
+  assertCanToggleTourActive,
+  assertAdminCannotSetProductionOnCreate,
+  assertDeveloperCannotSetProductionOnCreate,
+  assertCollaborationPeerUpdateAllowed,
+  assertDeveloperUpdateAllowed,
+  canAdminTransferTourEnvironment,
+  filterProductionRuntimeTours,
+  hasSandboxRuntimeAccess,
+  isAdminActor,
+  isDeveloperActor,
+  isDeveloperOwnedSandboxTour,
+  resolveCreateTourEnvironment,
+  type TourActivationAudience,
+  type TourPermissionActor,
+  type TourRuntimeContext,
+} from './guided-tour-permissions.util';
+import {
+  assertCanAcquireTourEditLock,
+  assertTourEditLockHeldForSave,
+  buildEditLockConflictMessage,
+  buildTourEditLockInfo,
+  isTourEditLockExpired,
+  isTourEditLockHeldBy,
+  TOUR_EDIT_LOCK_TTL_MS,
+  tourRequiresEditLock,
+  type TourEditLockInfo,
+} from './guided-tour-edit-lock.util';
 
 export type ContextualSemanticRole =
   | 'entry'
@@ -140,6 +222,8 @@ export class GuidedTourService {
     private stepRepository: Repository<Step>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(GuidedTourAccessGrant)
+    private accessGrantRepository: Repository<GuidedTourAccessGrant>,
     private organizationService: OrganizationService,
     private readonly tourSemanticWorker: TourSemanticPythonWorkerService,
   ) {}
@@ -441,6 +525,7 @@ export class GuidedTourService {
     dto: PublishContextualDraftsDto,
     organizationId: string,
     createdBy?: string,
+    actor?: TourPermissionActor,
   ): Promise<{
     processed: number;
     created: number;
@@ -474,7 +559,14 @@ export class GuidedTourService {
       if (!engineMeta?.intent || !engineMeta?.flowSignature) {
         continue;
       }
-      dedupeSet.add(this.buildDedupeKey(tour.targetUrl, engineMeta.intent, engineMeta.flowSignature));
+      dedupeSet.add(
+        this.buildPublishDedupeKey(
+          tour.targetUrl,
+          engineMeta.intent,
+          engineMeta.flowSignature,
+          tour.createdBy,
+        ),
+      );
     }
 
     const details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }> = [];
@@ -505,14 +597,19 @@ export class GuidedTourService {
         continue;
       }
 
-      const dedupeKey = this.buildDedupeKey(draft.targetUrl, intent, flowSignature);
+      const dedupeKey = this.buildPublishDedupeKey(
+        draft.targetUrl,
+        intent,
+        flowSignature,
+        createdBy,
+      );
       if (dedupeSet.has(dedupeKey)) {
         skipped += 1;
         details.push({ draftName: draft.name, outcome: 'skipped', reasons: ['duplicate_signature'] });
         continue;
       }
 
-      const version = this.computeNextVersion(existingTours, draft.targetUrl, intent);
+      const version = this.computeNextVersion(existingTours, draft.targetUrl, intent, createdBy);
       const shouldActivate =
         activationPolicy.effectiveAutoActivate &&
         draft.confidence >= threshold.activationConfidence &&
@@ -550,6 +647,7 @@ export class GuidedTourService {
               flowVersion: draft.flowVersioning.flowVersion,
               flowSignature,
               version,
+              publishedByRole: actor?.role,
               activationPolicy: {
                 mode: activationPolicy.mode,
                 reason: activationPolicy.reason,
@@ -578,6 +676,7 @@ export class GuidedTourService {
         },
         organizationId,
         createdBy,
+        actor,
       );
 
       created += 1;
@@ -1061,10 +1160,19 @@ export class GuidedTourService {
     return Object.values(StepType).includes(stepType) ? stepType : StepType.HIGHLIGHT;
   }
 
-  private computeNextVersion(existingTours: GuidedTour[], targetUrl: string, intent: string): number {
+  private computeNextVersion(
+    existingTours: GuidedTour[],
+    targetUrl: string,
+    intent: string,
+    publisherId?: string,
+  ): number {
     let maxVersion = 0;
+    const scopeByCreator = isSdkLabPublishScopedByCreator(targetUrl);
     for (const tour of existingTours) {
       if (tour.targetUrl !== targetUrl) {
+        continue;
+      }
+      if (scopeByCreator && publisherId && tour.createdBy !== publisherId) {
         continue;
       }
       const meta = this.getContextualMeta(tour);
@@ -1078,7 +1186,15 @@ export class GuidedTourService {
     return maxVersion + 1;
   }
 
-  private buildDedupeKey(targetUrl: string, intent: string, flowSignature: string): string {
+  private buildPublishDedupeKey(
+    targetUrl: string,
+    intent: string,
+    flowSignature: string,
+    publisherId?: string | null,
+  ): string {
+    if (isSdkLabPublishScopedByCreator(targetUrl) && publisherId) {
+      return buildSdkLabPublishDedupeKey(publisherId, targetUrl, intent, flowSignature);
+    }
     return `${targetUrl}::${intent}::${flowSignature}`;
   }
 
@@ -1139,17 +1255,44 @@ export class GuidedTourService {
   }
 
   // Créer un parcours avec ses étapes
-  async create(createTourDto: CreateGuidedTourDto, organizationId: string, createdBy?: string): Promise<GuidedTour> {
+  async create(
+    createTourDto: CreateGuidedTourDto,
+    organizationId: string,
+    createdBy?: string,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
     await this.organizationService.findById(organizationId);
+    assertDeveloperCannotSetProductionOnCreate(createTourDto, actor);
+    assertAdminCannotSetProductionOnCreate(createTourDto, actor);
+
+    const forkedFromTourIds = [
+      ...new Set(
+        (createTourDto.forkedFromTourIds ?? []).filter(
+          (id): id is string => typeof id === 'string' && id.length > 0,
+        ),
+      ),
+    ];
+    for (const sourceId of forkedFromTourIds) {
+      const sourceTour = await this.findById(sourceId, organizationId, actor);
+      assertCanForkTour(sourceTour, actor);
+    }
 
     // Extraire les étapes du DTO pour éviter le cascade automatique
-    const { steps: stepDtos, ...tourData } = createTourDto;
+    const { steps: stepDtos, environment: _ignoredEnvironment, forkedFromTourIds: _forked, ...tourData } =
+      createTourDto;
+    const { environment, sandboxStatus } = resolveCreateTourEnvironment(createTourDto, actor);
 
     // Créer le tour (sans les steps pour éviter cascade avec orderIndex null)
     const tour = this.tourRepository.create({
       ...tourData,
       organizationId,
       createdBy,
+      environment,
+      sandboxStatus,
+      developerPrivate: shouldApplyDeveloperPrivacyOnCreate(actor),
+      assignedAdminIds: [],
+      assignedToAdminsAt: null,
+      inCollaboration: false,
       triggerConditions: createTourDto.triggerConditions || {},
       simulationContext: createTourDto.simulationContext,
       replayPolicy: createTourDto.replayPolicy ?? TourReplayPolicy.NEVER,
@@ -1180,24 +1323,664 @@ export class GuidedTourService {
   }
 
   // Lister les parcours d'une organisation
-  async findAllByOrganization(organizationId: string, isActive?: boolean): Promise<GuidedTour[]> {
+  async findAllByOrganization(
+    organizationId: string,
+    actor?: TourPermissionActor | RequestAuthUser,
+    isActive?: boolean,
+    includeSteps = true,
+  ): Promise<GuidedTour[]> {
     const query = this.tourRepository
       .createQueryBuilder('tour')
-      .leftJoinAndSelect('tour.steps', 'step')
       .where('tour.organization_id = :organizationId', { organizationId })
       .orderBy('tour.is_active', 'DESC')
       .addOrderBy('tour.priority', 'DESC')
       .addOrderBy('tour.createdAt', 'DESC');
 
+    if (isDeveloperActor(actor) && actor?.id) {
+      query.andWhere(
+        `(tour.created_by = :developerId OR EXISTS (
+          SELECT 1 FROM guided_tour_access_grants g
+          WHERE g.tour_id = tour.id AND g.user_id = :developerId
+        ))`,
+        { developerId: actor.id },
+      );
+    } else if (isAdminActor(actor) && actor?.id) {
+      query.andWhere(
+        `(
+          tour.developer_private = false
+          OR :adminId = ANY(tour.assigned_admin_ids)
+          OR EXISTS (
+            SELECT 1 FROM guided_tour_access_grants g
+            WHERE g.tour_id = tour.id AND g.user_id = :adminId
+          )
+        )
+        AND NOT (
+          tour.developer_private = true
+          AND tour.sandbox_status IN ('rejected', 'returned')
+          AND NOT EXISTS (
+            SELECT 1 FROM guided_tour_access_grants g
+            WHERE g.tour_id = tour.id AND g.user_id = :adminId
+          )
+        )`,
+        { adminId: actor.id },
+      );
+    }
+
+    if (includeSteps) {
+      query.leftJoinAndSelect('tour.steps', 'step');
+    } else {
+      query.loadRelationCountAndMap('tour.stepCount', 'tour.steps');
+    }
+
     if (isActive !== undefined) {
       query.andWhere('tour.is_active = :isActive', { isActive });
     }
 
-    return query.getMany();
+    const tours = await query.getMany();
+    const actorId = actor?.id;
+    await this.attachSharingSummaryToTours(tours);
+    if (actorId) {
+      await this.attachActorAccessGrantsToTours(tours, actorId);
+    }
+    if (isAdminActor(actor) && actor?.id) {
+      return tours.filter((tour) => canActorViewTour(tour, actor));
+    }
+    return tours;
+  }
+
+  /** Indicateurs de partage org (lecture / collab) pour les badges carte. */
+  private async attachSharingSummaryToTours(tours: GuidedTour[]): Promise<void> {
+    const tourIds = tours.map((t) => t.id).filter((id): id is string => Boolean(id));
+    if (tourIds.length === 0) {
+      return;
+    }
+    const grants = await this.accessGrantRepository.find({
+      where: { tourId: In(tourIds) },
+    });
+    const viewTourIds = new Set<string>();
+    const collabGrantTourIds = new Set<string>();
+    for (const grant of grants) {
+      if (grant.accessMode === TourAccessMode.VIEW) {
+        viewTourIds.add(grant.tourId);
+      }
+      if (grant.accessMode === TourAccessMode.COLLABORATE) {
+        collabGrantTourIds.add(grant.tourId);
+      }
+    }
+    for (const tour of tours) {
+      tour.sharingHasView = viewTourIds.has(tour.id);
+      tour.sharingHasCollaborate =
+        collabGrantTourIds.has(tour.id) || Boolean(tour.inCollaboration);
+    }
+  }
+
+  /** Grants de l’acteur courant sur chaque parcours (liste dashboard). */
+  private async attachActorAccessGrantsToTours(
+    tours: GuidedTour[],
+    actorId: string,
+  ): Promise<void> {
+    const tourIds = tours.map((t) => t.id).filter((id): id is string => Boolean(id));
+    if (tourIds.length === 0) {
+      return;
+    }
+    const grants = await this.accessGrantRepository.find({
+      where: { tourId: In(tourIds), userId: actorId },
+      order: { createdAt: 'ASC' },
+    });
+    const byTourId = new Map<string, typeof grants>();
+    for (const grant of grants) {
+      const list = byTourId.get(grant.tourId) ?? [];
+      list.push(grant);
+      byTourId.set(grant.tourId, list);
+    }
+    for (const tour of tours) {
+      tour.accessGrants = byTourId.get(tour.id) ?? [];
+    }
+  }
+
+  async listOrganizationAdmins(organizationId: string): Promise<User[]> {
+    return this.userRepository.find({
+      where: { organizationId, role: UserRole.ADMIN, isActive: true },
+      order: { firstName: 'ASC', lastName: 'ASC' },
+    });
+  }
+
+  async listOrganizationMembers(
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<User[]> {
+    if (!actor?.id) {
+      return [];
+    }
+    const members = await this.userRepository.find({
+      where: {
+        organizationId,
+        isActive: true,
+        role: In([UserRole.ADMIN, UserRole.DEVELOPER]),
+      },
+      order: { firstName: 'ASC', lastName: 'ASC' },
+    });
+    return members.filter((m) => m.id !== actor.id);
+  }
+
+  private async deleteTourAccessGrants(tourId: string): Promise<void> {
+    await this.accessGrantRepository
+      .createQueryBuilder()
+      .delete()
+      .from(GuidedTourAccessGrant)
+      .where('tour_id = :tourId', { tourId })
+      .execute();
+  }
+
+  private async loadAccessGrantsForTour(
+    tourId: string,
+  ): Promise<GuidedTourAccessGrant[]> {
+    const grants = await this.accessGrantRepository.find({
+      where: { tourId },
+      order: { createdAt: 'ASC' },
+    });
+    if (grants.length === 0) {
+      return [];
+    }
+    const users = await this.userRepository.find({
+      where: { id: In(grants.map((g) => g.userId)) },
+    });
+    const usersById = new Map(users.map((u) => [u.id, u]));
+    return grants.map((grant) => ({
+      ...grant,
+      user: usersById.get(grant.userId),
+    }));
+  }
+
+  private async insertTourAccessGrants(
+    tourId: string,
+    organizationId: string,
+    grants: { userId: string; accessMode: TourAccessMode }[],
+    grantedBy: string | null,
+  ): Promise<void> {
+    for (const grant of grants) {
+      await this.accessGrantRepository.query(
+        `INSERT INTO guided_tour_access_grants
+          (tour_id, organization_id, user_id, access_mode, granted_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [tourId, organizationId, grant.userId, grant.accessMode, grantedBy],
+      );
+    }
+  }
+
+  async setTourAccessGrants(
+    id: string,
+    organizationId: string,
+    dto: SetTourAccessGrantsDto,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    if (!canManageTourAccess(tour, actor)) {
+      throw new ForbiddenException(
+        'Seul le propriétaire du parcours peut gérer le partage.',
+      );
+    }
+    if (tour.environment !== TourEnvironment.SANDBOX) {
+      throw new BadRequestException(
+        'Le partage lecture/collaboration est disponible uniquement en sandbox.',
+      );
+    }
+    if (isTourSharingLockedByDeveloperApproval(tour)) {
+      throw new BadRequestException('Parcours déjà approuvé : partage non modifiable.');
+    }
+    if (
+      isDeveloperActor(actor) &&
+      tour.createdBy === actor?.id &&
+      tour.sandboxStatus === TourSandboxStatus.PENDING &&
+      normalizeAssignedAdminIds(tour.assignedAdminIds).length > 0
+    ) {
+      throw new BadRequestException(
+        'Ce parcours est en attente de modération : le partage est verrouillé jusqu’à la décision de l’administrateur.',
+      );
+    }
+
+    const uniqueGrants = new Map<string, TourAccessMode>();
+    for (const item of dto.grants) {
+      if (item.userId === tour.createdBy) {
+        continue;
+      }
+      uniqueGrants.set(item.userId, item.accessMode);
+    }
+
+    if (hasDeveloperModerationSubmissionHistory(tour)) {
+      const dedicatedModeratorId = resolveDedicatedModeratorAdminId(tour);
+      const dedicatedGrantMode = dedicatedModeratorId
+        ? uniqueGrants.get(dedicatedModeratorId)
+        : undefined;
+      if (dedicatedGrantMode === TourAccessMode.COLLABORATE) {
+        throw new BadRequestException(
+          'Le modérateur administrateur dédié ne peut pas être invité en collaboration sur ce parcours.',
+        );
+      }
+      if (dedicatedGrantMode === TourAccessMode.VIEW) {
+        throw new BadRequestException(
+          'Le modérateur administrateur dédié ne peut pas être invité en lecture seule sur ce parcours.',
+        );
+      }
+    }
+
+    const userIds = [...uniqueGrants.keys()];
+    if (userIds.length > 0) {
+      const members = await this.userRepository.find({
+        where: {
+          id: In(userIds),
+          organizationId,
+          isActive: true,
+          role: In([UserRole.ADMIN, UserRole.DEVELOPER]),
+        },
+      });
+      if (members.length !== userIds.length) {
+        throw new BadRequestException(
+          'Un ou plusieurs membres sont invalides ou hors de votre organisation.',
+        );
+      }
+    }
+
+    if (dto.replace !== false) {
+      await this.deleteTourAccessGrants(id);
+    }
+
+    if (uniqueGrants.size > 0) {
+      await this.insertTourAccessGrants(
+        id,
+        organizationId,
+        [...uniqueGrants.entries()].map(([userId, accessMode]) => ({
+          userId,
+          accessMode,
+        })),
+        actor?.id ?? null,
+      );
+    }
+
+    const persistedGrants = await this.loadAccessGrantsForTour(id);
+    const hasViewGrants = persistedGrants.some((g) => g.accessMode === TourAccessMode.VIEW);
+    const hasCollabGrants = persistedGrants.some(
+      (g) => g.accessMode === TourAccessMode.COLLABORATE,
+    );
+    tour.inCollaboration = hasCollabGrants;
+
+    const tourPatch: Partial<GuidedTour> = {
+      inCollaboration: tour.inCollaboration,
+    };
+
+    if (!hasViewGrants) {
+      tourPatch.developerViewShareMessage = null;
+      tourPatch.developerViewShareMessageAt = null;
+    } else if (dto.messageForMode === TourAccessMode.VIEW && dto.message !== undefined) {
+      const viewMessage = dto.message?.trim() || null;
+      const previousViewMessage = tour.developerViewShareMessage?.trim() || null;
+      if (viewMessage !== previousViewMessage) {
+        tourPatch.developerViewShareMessage = viewMessage;
+        tourPatch.developerViewShareMessageAt = viewMessage ? new Date() : null;
+      }
+    }
+
+    if (!hasCollabGrants) {
+      tourPatch.developerCollaborateShareMessage = null;
+      tourPatch.developerCollaborateShareMessageAt = null;
+      tourPatch.editLockedBy = null;
+      tourPatch.editLockedAt = null;
+      tourPatch.editLockExpiresAt = null;
+    } else if (dto.messageForMode === TourAccessMode.COLLABORATE && dto.message !== undefined) {
+      const collabMessage = dto.message?.trim() || null;
+      const previousCollabMessage = tour.developerCollaborateShareMessage?.trim() || null;
+      if (collabMessage !== previousCollabMessage) {
+        tourPatch.developerCollaborateShareMessage = collabMessage;
+        tourPatch.developerCollaborateShareMessageAt = collabMessage ? new Date() : null;
+      }
+    }
+
+    await this.tourRepository.save({ id: tour.id, ...tourPatch });
+    return this.findById(id, organizationId, actor);
+  }
+
+  private async clearTourSharingGrantsAndLock(tourId: string): Promise<void> {
+    await this.deleteTourAccessGrants(tourId);
+    await this.tourRepository.update(tourId, {
+      inCollaboration: false,
+      editLockedBy: null,
+      editLockedAt: null,
+      editLockExpiresAt: null,
+      developerViewShareMessage: null,
+      developerViewShareMessageAt: null,
+      developerCollaborateShareMessage: null,
+      developerCollaborateShareMessageAt: null,
+    });
+  }
+
+  private normalizeSingleAssignAdminIds(
+    adminIds: string[],
+    options?: { forbidActorId?: string },
+  ): string[] {
+    const uniqueIds = [...new Set(adminIds)];
+    if (uniqueIds.length !== 1) {
+      throw new BadRequestException('Un seul administrateur peut être assigné par parcours.');
+    }
+    if (options?.forbidActorId && uniqueIds[0] === options.forbidActorId) {
+      throw new BadRequestException('Vous ne pouvez pas réassigner la modération à vous-même.');
+    }
+    return uniqueIds;
+  }
+
+  async assignTourToAdmins(
+    id: string,
+    organizationId: string,
+    dto: AssignTourAdminsDto,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    if (!isDeveloperActor(actor) || tour.createdBy !== actor?.id) {
+      throw new ForbiddenException(
+        'Seul le développeur créateur peut assigner ce parcours à des administrateurs.',
+      );
+    }
+    if (tour.sandboxStatus === TourSandboxStatus.APPROVED) {
+      throw new BadRequestException(
+        'Ce parcours est déjà approuvé : modification d’assignation non autorisée.',
+      );
+    }
+    if (tour.inCollaboration) {
+      throw new BadRequestException(
+        'Terminez la collaboration (retirez les accès collaborateur) avant d’assigner aux administrateurs.',
+      );
+    }
+    if (
+      tour.sandboxStatus === TourSandboxStatus.PENDING &&
+      normalizeAssignedAdminIds(tour.assignedAdminIds).length > 0
+    ) {
+      throw new BadRequestException(
+        'Ce parcours est déjà en attente de modération. Attendez l’approbation ou le rejet de l’administrateur assigné.',
+      );
+    }
+
+    const uniqueIds = this.normalizeSingleAssignAdminIds(dto.adminIds);
+    const dedicatedModeratorId = resolveDedicatedModeratorAdminId(tour);
+    if (
+      dedicatedModeratorId &&
+      (tour.sandboxStatus === TourSandboxStatus.RETURNED ||
+        tour.sandboxStatus === TourSandboxStatus.REJECTED) &&
+      uniqueIds[0] !== dedicatedModeratorId
+    ) {
+      throw new BadRequestException(
+        'Ce parcours doit être renvoyé au modérateur administrateur déjà en charge.',
+      );
+    }
+    const admins = await this.userRepository.find({
+      where: {
+        id: In(uniqueIds),
+        organizationId,
+        role: UserRole.ADMIN,
+        isActive: true,
+      },
+    });
+    if (admins.length !== uniqueIds.length) {
+      throw new BadRequestException(
+        'Un ou plusieurs administrateurs sont invalides ou hors de votre organisation.',
+      );
+    }
+
+    await this.tourRepository.manager.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(GuidedTourAccessGrant)
+        .where('tour_id = :tourId', { tourId: id })
+        .execute();
+
+      tour.inCollaboration = false;
+      tour.assignedAdminIds = uniqueIds;
+      tour.assignedToAdminsAt = new Date();
+      tour.developerPrivate = true;
+      tour.editLockedBy = null;
+      tour.editLockedAt = null;
+      tour.editLockExpiresAt = null;
+      if (
+        tour.sandboxStatus === TourSandboxStatus.RETURNED ||
+        tour.sandboxStatus === TourSandboxStatus.REJECTED
+      ) {
+        tour.sandboxRejectionReason = null;
+        tour.sandboxRejectedAt = null;
+        tour.sandboxRejectedBy = null;
+      }
+      const submissionMessage = dto.message?.trim();
+      tour.developerSubmissionMessage = submissionMessage || null;
+      tour.sandboxStatus = TourSandboxStatus.PENDING;
+      await manager.save(GuidedTour, tour);
+    });
+    return this.findById(id, organizationId, actor);
+  }
+
+  async reopenApprovedTourToDeveloper(
+    id: string,
+    organizationId: string,
+    reason: string | undefined,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanModerateAssignedDeveloperTour(tour, actor);
+    assertCanReopenApprovedDeveloperTour(tour);
+    if (normalizeAssignedAdminIds(tour.assignedAdminIds).length === 0) {
+      throw new BadRequestException('Ce parcours n’a pas été soumis à la modération admin.');
+    }
+
+    tour.sandboxStatus = TourSandboxStatus.RETURNED;
+    tour.sandboxRejectionReason = reason?.trim() || null;
+    tour.sandboxRejectedAt = new Date();
+    tour.sandboxRejectedBy = actor?.id ?? null;
+    tour.assignedAdminIds = actor?.id ? [actor.id] : [];
+    tour.assignedToAdminsAt = new Date();
+    tour.isActive = false;
+    tour.isSandboxTestActive = false;
+    tour.sandboxTestStartedBy = null;
+    tour.developerPrivate = true;
+    tour.inCollaboration = false;
+    tour.editLockedBy = null;
+    tour.editLockedAt = null;
+    tour.editLockExpiresAt = null;
+
+    await this.tourRepository.manager.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(GuidedTourAccessGrant)
+        .where('tour_id = :tourId', { tourId: id })
+        .execute();
+      await manager.save(GuidedTour, tour);
+    });
+
+    return this.findByIdWithoutAccessCheck(id, organizationId);
+  }
+
+  async reassignApprovedTourAdmins(
+    id: string,
+    organizationId: string,
+    dto: AssignTourAdminsDto,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanModerateAssignedDeveloperTour(tour, actor);
+    assertCanReassignApprovedTourAdmins(tour);
+    if (normalizeAssignedAdminIds(tour.assignedAdminIds).length === 0) {
+      throw new BadRequestException('Ce parcours n’a pas été soumis à la modération admin.');
+    }
+
+    const uniqueIds = this.normalizeSingleAssignAdminIds(dto.adminIds, {
+      forbidActorId: actor?.id,
+    });
+    const admins = await this.userRepository.find({
+      where: {
+        id: In(uniqueIds),
+        organizationId,
+        role: UserRole.ADMIN,
+        isActive: true,
+      },
+    });
+    if (admins.length !== uniqueIds.length) {
+      throw new BadRequestException(
+        'Un ou plusieurs administrateurs sont invalides ou hors de votre organisation.',
+      );
+    }
+
+    tour.assignedAdminIds = uniqueIds;
+    tour.assignedToAdminsAt = new Date();
+    await this.tourRepository.save(tour);
+
+    // L’admin peut se retirer de la nouvelle liste : ne pas ré-appliquer assertCanViewTour.
+    return this.findByIdWithoutAccessCheck(id, organizationId);
+  }
+
+  /** Délègue la gestion prod d’un parcours admin à un autre administrateur (propriétaire uniquement). */
+  async transferProductionManagement(
+    id: string,
+    organizationId: string,
+    dto: TransferProductionManagementDto,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    if (!isAdminActor(actor)) {
+      throw new ForbiddenException('Seuls les administrateurs peuvent déléguer la gestion.');
+    }
+    if (!isAdminOriginatedProductionTour(tour)) {
+      throw new BadRequestException(
+        'La délégation de gestion prod concerne uniquement les parcours administrateur en production.',
+      );
+    }
+    if (!tour.createdBy || tour.createdBy !== actor?.id) {
+      throw new ForbiddenException(
+        'Seul le créateur administrateur peut déléguer ou reprendre la gestion en production.',
+      );
+    }
+
+    const targetAdmin = await this.userRepository.findOne({
+      where: {
+        id: dto.adminId,
+        organizationId,
+        role: UserRole.ADMIN,
+        isActive: true,
+      },
+    });
+    if (!targetAdmin) {
+      throw new BadRequestException(
+        'L’administrateur sélectionné est invalide ou hors de votre organisation.',
+      );
+    }
+
+    tour.productionManagedByAdminId = dto.adminId;
+    await this.tourRepository.save(tour);
+    return this.findById(id, organizationId, actor);
+  }
+
+  async transferApprovedTourToDeveloper(
+    id: string,
+    organizationId: string,
+    dto: TransferTourDeveloperDto,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanModerateAssignedDeveloperTour(tour, actor);
+    assertCanTransferApprovedDeveloperTour(tour);
+    if (normalizeAssignedAdminIds(tour.assignedAdminIds).length === 0) {
+      throw new BadRequestException('Ce parcours n’a pas été soumis à la modération admin.');
+    }
+
+    const fromUserId = tour.createdBy;
+    if (!fromUserId) {
+      throw new BadRequestException('Propriétaire du parcours introuvable.');
+    }
+    if (dto.developerId === fromUserId) {
+      throw new BadRequestException('Le développeur cible est déjà propriétaire de ce parcours.');
+    }
+
+    const developer = await this.userRepository.findOne({
+      where: {
+        id: dto.developerId,
+        organizationId,
+        role: UserRole.DEVELOPER,
+        isActive: true,
+      },
+    });
+    if (!developer) {
+      throw new BadRequestException(
+        'Le développeur sélectionné est invalide ou hors de votre organisation.',
+      );
+    }
+
+    const reason = dto.reason.trim();
+    const auditReason = `Parcours transféré à un autre développeur. Motif : ${reason}`;
+
+    await this.tourRepository.manager.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(GuidedTourAccessGrant)
+        .where('tour_id = :tourId', { tourId: id })
+        .execute();
+
+      const transferRecord = manager.create(GuidedTourDeveloperTransfer, {
+        tourId: id,
+        organizationId,
+        fromUserId,
+        toUserId: dto.developerId,
+        transferredBy: actor?.id ?? '',
+        reason,
+      });
+      await manager.save(GuidedTourDeveloperTransfer, transferRecord);
+
+      tour.createdBy = dto.developerId;
+      tour.sandboxStatus = TourSandboxStatus.RETURNED;
+      tour.sandboxRejectionReason = auditReason;
+      tour.sandboxRejectedAt = new Date();
+      tour.sandboxRejectedBy = actor?.id ?? null;
+      tour.assignedAdminIds = actor?.id ? [actor.id] : [];
+      tour.assignedToAdminsAt = new Date();
+      tour.isActive = false;
+      tour.isSandboxTestActive = false;
+      tour.sandboxTestStartedBy = null;
+      tour.developerPrivate = true;
+      tour.inCollaboration = false;
+      tour.editLockedBy = null;
+      tour.editLockedAt = null;
+      tour.editLockExpiresAt = null;
+
+      await manager.save(GuidedTour, tour);
+
+      await manager.query(
+        `INSERT INTO guided_tour_access_grants
+          (tour_id, organization_id, user_id, access_mode, granted_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, organizationId, fromUserId, TourAccessMode.VIEW, actor?.id ?? null],
+      );
+    });
+
+    return this.findByIdWithoutAccessCheck(id, organizationId);
+  }
+
+  private async findByIdWithoutAccessCheck(
+    id: string,
+    organizationId: string,
+  ): Promise<GuidedTour> {
+    const tour = await this.tourRepository.findOne({
+      where: { id, organizationId },
+      relations: ['steps', 'organization'],
+    });
+    if (!tour) {
+      throw new NotFoundException(`Parcours introuvable ou vous n'avez pas les permissions`);
+    }
+    tour.steps.sort((a, b) => a.orderIndex - b.orderIndex);
+    return tour;
   }
 
   // Trouver un parcours par ID avec validation d'organisation
-  async findById(id: string, organizationId: string): Promise<GuidedTour> {
+  async findById(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
     const tour = await this.tourRepository.findOne({
       where: { id, organizationId },
       relations: ['steps', 'organization'],
@@ -1207,20 +1990,204 @@ export class GuidedTourService {
       throw new NotFoundException(`Parcours introuvable ou vous n'avez pas les permissions`);
     }
 
-    // Trier les étapes par ordre
+    tour.accessGrants = await this.loadAccessGrantsForTour(id);
+    tour.sharingHasView = tour.accessGrants.some((g) => g.accessMode === TourAccessMode.VIEW);
+    tour.sharingHasCollaborate =
+      tour.accessGrants.some((g) => g.accessMode === TourAccessMode.COLLABORATE) ||
+      Boolean(tour.inCollaboration);
+    assertCanViewTour(tour, actor);
+
     tour.steps.sort((a, b) => a.orderIndex - b.orderIndex);
+    await this.attachEditLockToTour(tour, actor);
     return tour;
   }
 
+  private async loadUserDisplayName(userId: string): Promise<string | undefined> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'firstName', 'lastName', 'email'],
+    });
+    if (!user) {
+      return undefined;
+    }
+    const full = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    return full || user.email;
+  }
+
+  private async attachEditLockToTour(
+    tour: GuidedTour,
+    actor?: TourPermissionActor,
+  ): Promise<void> {
+    let holderDisplayName: string | undefined;
+    if (
+      tour.editLockedBy &&
+      !isTourEditLockExpired(tour.editLockExpiresAt)
+    ) {
+      holderDisplayName = await this.loadUserDisplayName(tour.editLockedBy);
+    }
+    const info = buildTourEditLockInfo(tour, actor, holderDisplayName);
+    tour.editLock = info;
+  }
+
+  async acquireTourEditLock(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<{ tour: GuidedTour; editLock: TourEditLockInfo }> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanAcquireTourEditLock(tour, actor);
+
+    if (!tourRequiresEditLock(tour)) {
+      return { tour, editLock: tour.editLock ?? buildTourEditLockInfo(tour, actor) };
+    }
+
+    const actorId = actor!.id;
+    const now = new Date();
+
+    if (
+      !tour.editLockedBy ||
+      isTourEditLockExpired(tour.editLockExpiresAt) ||
+      tour.editLockedBy === actorId
+    ) {
+      tour.editLockedBy = actorId;
+      tour.editLockedAt = now;
+      tour.editLockExpiresAt = new Date(now.getTime() + TOUR_EDIT_LOCK_TTL_MS);
+      await this.tourRepository.save({
+        id: tour.id,
+        editLockedBy: tour.editLockedBy,
+        editLockedAt: tour.editLockedAt,
+        editLockExpiresAt: tour.editLockExpiresAt,
+      });
+      const refreshed = await this.findById(id, organizationId, actor);
+      return { tour: refreshed, editLock: refreshed.editLock! };
+    }
+
+    const holderDisplayName = await this.loadUserDisplayName(tour.editLockedBy);
+    const editLock = buildTourEditLockInfo(tour, actor, holderDisplayName);
+    throw new ConflictException({
+      message: buildEditLockConflictMessage(holderDisplayName),
+      editLock,
+    });
+  }
+
+  async renewTourEditLock(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<{ tour: GuidedTour; editLock: TourEditLockInfo }> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanAcquireTourEditLock(tour, actor);
+
+    if (!tourRequiresEditLock(tour)) {
+      return { tour, editLock: tour.editLock ?? buildTourEditLockInfo(tour, actor) };
+    }
+
+    if (!isTourEditLockHeldBy(tour, actor?.id)) {
+      const holderDisplayName = tour.editLockedBy
+        ? await this.loadUserDisplayName(tour.editLockedBy)
+        : undefined;
+      throw new ConflictException({
+        message: buildEditLockConflictMessage(holderDisplayName),
+        editLock: buildTourEditLockInfo(tour, actor, holderDisplayName),
+      });
+    }
+
+    const now = new Date();
+    tour.editLockExpiresAt = new Date(now.getTime() + TOUR_EDIT_LOCK_TTL_MS);
+    await this.tourRepository.save({
+      id: tour.id,
+      editLockExpiresAt: tour.editLockExpiresAt,
+    });
+    const refreshed = await this.findById(id, organizationId, actor);
+    return { tour: refreshed, editLock: refreshed.editLock! };
+  }
+
+  async releaseTourEditLock(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<void> {
+    const tour = await this.tourRepository.findOne({
+      where: { id, organizationId },
+    });
+    if (!tour) {
+      return;
+    }
+    if (!tour.editLockedBy) {
+      return;
+    }
+    if (
+      tour.editLockedBy !== actor?.id &&
+      !isTourEditLockExpired(tour.editLockExpiresAt)
+    ) {
+      return;
+    }
+    tour.editLockedBy = null;
+    tour.editLockedAt = null;
+    tour.editLockExpiresAt = null;
+    await this.tourRepository.save({
+      id: tour.id,
+      editLockedBy: null,
+      editLockedAt: null,
+      editLockExpiresAt: null,
+    });
+  }
+
+  async exportTourById(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<TourExportPayload> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanExportTour(tour, actor);
+    return buildTourExportPayload(tour);
+  }
+
   // Mettre à jour un parcours
-  async update(id: string, updateTourDto: UpdateGuidedTourDto, organizationId: string): Promise<GuidedTour> {
-    const tour = await this.findById(id, organizationId);
+  async update(
+    id: string,
+    updateTourDto: UpdateGuidedTourDto,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanMutateTourWithGrants(tour, actor);
+    assertProductionTourStructuredUpdateAllowed(tour, updateTourDto);
+    assertDeveloperUpdateAllowed(tour, updateTourDto, actor);
+    assertCollaborationPeerUpdateAllowed(tour, updateTourDto, actor);
+
+    if (tourRequiresEditLock(tour)) {
+      const holderDisplayName =
+        tour.editLockedBy && !isTourEditLockExpired(tour.editLockExpiresAt)
+          ? await this.loadUserDisplayName(tour.editLockedBy)
+          : undefined;
+      assertTourEditLockHeldForSave(tour, actor, holderDisplayName);
+      if (isTourEditLockHeldBy(tour, actor?.id)) {
+        tour.editLockExpiresAt = new Date(Date.now() + TOUR_EDIT_LOCK_TTL_MS);
+        await this.tourRepository.save({
+          id: tour.id,
+          editLockExpiresAt: tour.editLockExpiresAt,
+        });
+      }
+    }
 
     // Mettre à jour les champs simples
     if (updateTourDto.name !== undefined) tour.name = updateTourDto.name;
     if (updateTourDto.description !== undefined) tour.description = updateTourDto.description;
     if (updateTourDto.targetUrl !== undefined) tour.targetUrl = updateTourDto.targetUrl;
-    if (updateTourDto.isActive !== undefined) tour.isActive = updateTourDto.isActive;
+    if (updateTourDto.isActive !== undefined) {
+      if (tour.environment === TourEnvironment.SANDBOX) {
+        await this.applySandboxAudienceActivation(
+          tour,
+          updateTourDto.isActive,
+          actor,
+          id,
+          organizationId,
+        );
+      } else {
+        tour.isActive = updateTourDto.isActive;
+      }
+    }
     if (updateTourDto.priority !== undefined) tour.priority = updateTourDto.priority;
     if (updateTourDto.triggerConditions !== undefined) {
       tour.triggerConditions = { ...tour.triggerConditions, ...updateTourDto.triggerConditions };
@@ -1233,6 +2200,15 @@ export class GuidedTourService {
     }
     if (updateTourDto.replayAfterDays !== undefined) {
       tour.replayAfterDays = Math.max(0, updateTourDto.replayAfterDays);
+    }
+
+    if (updateTourDto.environment !== undefined && canAdminTransferTourEnvironment(tour, actor)) {
+      await this.applyAdminEnvironmentTransfer(
+        tour,
+        updateTourDto.environment,
+        organizationId,
+        actor,
+      );
     }
 
     // Sauvegarder le tour mis à jour
@@ -1255,11 +2231,13 @@ export class GuidedTourService {
       await this.stepRepository.save(newSteps);
     }
 
-    return this.findById(id, organizationId);
+    return this.findById(id, organizationId, actor);
   }
 
   // Supprimer un parcours (hard delete)
-  async delete(id: string, organizationId: string): Promise<void> {
+  async delete(id: string, organizationId: string, actor?: TourPermissionActor): Promise<void> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanDeleteTour(tour, actor);
     const result = await this.tourRepository.delete({ id, organizationId });
     if (!result.affected) {
       throw new NotFoundException(`Parcours introuvable ou vous n'avez pas les permissions`);
@@ -1267,69 +2245,331 @@ export class GuidedTourService {
   }
 
   // Activer/désactiver un parcours
-  async toggleActive(id: string, organizationId: string, isActive: boolean): Promise<GuidedTour> {
-    const tour = await this.findById(id, organizationId);
-    tour.isActive = isActive;
+  async toggleActive(
+    id: string,
+    organizationId: string,
+    isActive: boolean,
+    actor?: TourPermissionActor,
+    audience?: TourActivationAudience,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    const resolvedAudience =
+      audience ?? (tour.environment === TourEnvironment.SANDBOX ? 'sandbox' : 'production');
+    assertCanToggleTourActive(tour, actor, resolvedAudience);
+
+    if (resolvedAudience === 'sandbox') {
+      await this.applySandboxAudienceActivation(tour, isActive, actor, id, organizationId);
+    } else {
+      tour.isActive = isActive;
+    }
+
     return this.tourRepository.save(tour);
   }
 
-  // Trouver les parcours actifs pour une URL cible
-  async findActiveToursForUrl(url: string, organizationId: string, userId?: string): Promise<GuidedTour[]> {
-    const tours = await this.tourRepository.find({
-      where: {
-        organizationId,
-        targetUrl: url,
-        isActive: true,
-      },
-      relations: ['steps'],
-      order: { priority: 'DESC' },
-    });
+  /** Active/désactive le canal test sandbox (isActive ou isSandboxTestActive + lanceur). */
+  private async applySandboxAudienceActivation(
+    tour: GuidedTour,
+    isActive: boolean,
+    actor: TourPermissionActor | undefined,
+    tourId: string,
+    organizationId: string,
+  ): Promise<void> {
+    if (tour.environment === TourEnvironment.PRODUCTION) {
+      tour.isSandboxTestActive = isActive;
+    } else {
+      tour.isActive = isActive;
+    }
+    tour.sandboxTestStartedBy = isActive ? (actor?.id ?? null) : null;
+    if (!isActive) {
+      await this.clearTourUserStatesForEnvironment(tourId, organizationId, TourEnvironment.SANDBOX);
+    }
+  }
 
-    if (!userId || tours.length === 0) {
-      return tours;
+  private async clearTourUserStatesForEnvironment(
+    tourId: string,
+    organizationId: string,
+    environment: TourEnvironment,
+  ): Promise<void> {
+    await this.tourUserStateRepository.delete({
+      tourId,
+      organizationId,
+      environment,
+    });
+  }
+
+  /**
+   * Transfert sandbox ↔ production (admin uniquement), déclenché par le champ Environnement de l’éditeur.
+   */
+  private async applyAdminEnvironmentTransfer(
+    tour: GuidedTour,
+    targetEnvironment: TourEnvironment,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<void> {
+    if (!isAdminActor(actor)) {
+      return;
+    }
+    if (tour.environment === targetEnvironment) {
+      return;
     }
 
-    const tourIds = tours.map((tour) => tour.id);
-    const dismissedStates = await this.tourUserStateRepository.find({
+    if (targetEnvironment === TourEnvironment.PRODUCTION) {
+      assertCanAdminTransferToProduction(tour);
+      const preserveSandboxTest = tour.isActive || tour.isSandboxTestActive;
+      tour.environment = TourEnvironment.PRODUCTION;
+      tour.sandboxStatus = TourSandboxStatus.APPROVED;
+      tour.sandboxRejectionReason = null;
+      tour.sandboxRejectedAt = null;
+      tour.sandboxRejectedBy = null;
+      tour.isSandboxTestActive = preserveSandboxTest;
+      tour.sandboxTestStartedBy = preserveSandboxTest
+        ? (tour.sandboxTestStartedBy ?? tour.createdBy ?? actor?.id ?? null)
+        : null;
+      tour.isActive = false;
+      await this.clearTourSharingGrantsAndLock(tour.id);
+      if (isAdminOriginatedTour(tour)) {
+        tour.productionManagedByAdminId = tour.createdBy ?? actor?.id ?? null;
+      }
+      return;
+    }
+
+    const fromProduction = tour.environment === TourEnvironment.PRODUCTION;
+    tour.environment = TourEnvironment.SANDBOX;
+    // Ne pas rouvrir la file modération (pending) après promotion prod.
+    if (fromProduction && tour.sandboxStatus !== TourSandboxStatus.REJECTED) {
+      tour.sandboxStatus = TourSandboxStatus.APPROVED;
+    }
+    tour.sandboxRejectionReason = null;
+    tour.sandboxRejectedAt = null;
+    tour.sandboxRejectedBy = null;
+    tour.isActive = false;
+    tour.isSandboxTestActive = false;
+    tour.sandboxTestStartedBy = null;
+    if (fromProduction && isAdminOriginatedTour(tour)) {
+      tour.productionManagedByAdminId = null;
+    }
+    await this.clearTourUserStatesForEnvironment(tour.id, organizationId, TourEnvironment.PRODUCTION);
+  }
+
+  async approveSandboxTour(
+    id: string,
+    organizationId: string,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanApproveSandboxTour(tour, actor);
+    assertCanModerateAssignedDeveloperTour(tour, actor);
+    const preserveSandboxTest = tour.isActive;
+    tour.environment = TourEnvironment.SANDBOX;
+    tour.sandboxStatus = TourSandboxStatus.APPROVED;
+    tour.sandboxRejectionReason = null;
+    tour.sandboxRejectedAt = null;
+    tour.sandboxRejectedBy = null;
+    tour.developerSubmissionMessage = null;
+    tour.isActive = preserveSandboxTest;
+    tour.isSandboxTestActive = false;
+    tour.sandboxTestStartedBy = preserveSandboxTest
+      ? (tour.sandboxTestStartedBy ?? tour.createdBy ?? actor?.id ?? null)
+      : null;
+    await this.tourRepository.save(tour);
+    await this.clearTourSharingGrantsAndLock(tour.id);
+    return this.findById(id, organizationId, actor);
+  }
+
+  async rejectSandboxTour(
+    id: string,
+    organizationId: string,
+    reason: string | undefined,
+    actor?: TourPermissionActor,
+  ): Promise<GuidedTour> {
+    const tour = await this.findById(id, organizationId, actor);
+    assertCanRejectSandboxTour(tour, actor);
+    assertCanModerateAssignedDeveloperTour(tour, actor);
+    tour.sandboxStatus = TourSandboxStatus.REJECTED;
+    tour.sandboxRejectionReason = reason?.trim() || null;
+    tour.sandboxRejectedAt = new Date();
+    tour.sandboxRejectedBy = actor?.id ?? null;
+    tour.assignedAdminIds = actor?.id ? [actor.id] : [];
+    tour.assignedToAdminsAt = new Date();
+    tour.developerPrivate = true;
+    tour.isActive = false;
+    tour.sandboxTestStartedBy = null;
+    return this.tourRepository.save(tour);
+  }
+
+  private async queryActiveToursForUrl(
+    url: string,
+    organizationId: string,
+    environment: TourEnvironment,
+    options?: { createdBy?: string },
+  ): Promise<GuidedTour[]> {
+    const query = this.tourRepository
+      .createQueryBuilder('tour')
+      .leftJoinAndSelect('tour.steps', 'step')
+      .where('tour.organization_id = :organizationId', { organizationId })
+      .andWhere('tour.target_url = :url', { url })
+      .andWhere('tour.is_active = :isActive', { isActive: true })
+      .andWhere('tour.environment = :environment', { environment })
+      .orderBy('tour.priority', 'DESC');
+
+    if (options?.createdBy) {
+      query.andWhere('tour.created_by = :createdBy', { createdBy: options.createdBy });
+    }
+
+    return query.getMany();
+  }
+
+  /** Parcours sandbox d’un autre auteur, partagés via grant view/collaborate. */
+  private async querySharedSandboxToursForUrl(
+    url: string,
+    organizationId: string,
+    userId: string,
+  ): Promise<GuidedTour[]> {
+    return this.tourRepository
+      .createQueryBuilder('tour')
+      .leftJoinAndSelect('tour.steps', 'step')
+      .innerJoin(
+        'guided_tour_access_grants',
+        'grant',
+        'grant.tour_id = tour.id AND grant.user_id = :userId',
+        { userId },
+      )
+      .where('tour.organization_id = :organizationId', { organizationId })
+      .andWhere('tour.target_url = :url', { url })
+      .andWhere('tour.is_active = :isActive', { isActive: true })
+      .andWhere('tour.environment = :environment', { environment: TourEnvironment.SANDBOX })
+      .andWhere('tour.created_by != :userId', { userId })
+      .orderBy('tour.priority', 'DESC')
+      .getMany();
+  }
+
+  private async querySandboxTestProductionToursForUrl(
+    url: string,
+    organizationId: string,
+  ): Promise<GuidedTour[]> {
+    return this.tourRepository
+      .createQueryBuilder('tour')
+      .leftJoinAndSelect('tour.steps', 'step')
+      .where('tour.organization_id = :organizationId', { organizationId })
+      .andWhere('tour.target_url = :url', { url })
+      .andWhere('tour.environment = :environment', { environment: TourEnvironment.PRODUCTION })
+      .andWhere('tour.is_sandbox_test_active = :isSandboxTestActive', { isSandboxTestActive: true })
+      .orderBy('tour.priority', 'DESC')
+      .getMany();
+  }
+
+  // Trouver les parcours actifs pour une URL cible
+  async findActiveToursForUrl(
+    url: string,
+    organizationId: string,
+    userId?: string,
+    runtime?: TourRuntimeContext,
+  ): Promise<GuidedTour[]> {
+    const productionTours = filterProductionRuntimeTours(
+      await this.queryActiveToursForUrl(url, organizationId, TourEnvironment.PRODUCTION),
+      userId ?? runtime?.userId,
+    );
+
+    let sandboxTours: GuidedTour[] = [];
+    let sandboxTestProductionTours: GuidedTour[] = [];
+    if (hasSandboxRuntimeAccess(runtime)) {
+      sandboxTours = await this.queryActiveToursForUrl(url, organizationId, TourEnvironment.SANDBOX, {
+        createdBy: runtime?.userRole === UserRole.DEVELOPER ? runtime?.userId : undefined,
+      });
+      if (runtime?.userId) {
+        const sharedSandboxTours = await this.querySharedSandboxToursForUrl(
+          url,
+          organizationId,
+          runtime.userId,
+        );
+        const seenSandboxIds = new Set(sandboxTours.map((t) => t.id));
+        for (const shared of sharedSandboxTours) {
+          if (!seenSandboxIds.has(shared.id)) {
+            sandboxTours.push(shared);
+            seenSandboxIds.add(shared.id);
+          }
+        }
+      }
+      sandboxTestProductionTours = await this.querySandboxTestProductionToursForUrl(url, organizationId);
+    }
+
+    const allCandidates = [...productionTours, ...sandboxTours, ...sandboxTestProductionTours];
+
+    if (runtime?.userId && allCandidates.length > 0) {
+      await this.attachActorAccessGrantsToTours(allCandidates, runtime.userId);
+    }
+
+    if (!userId || allCandidates.length === 0) {
+      const merged: GuidedTour[] = [];
+      const seen = new Set<string>();
+      for (const tour of allCandidates) {
+        if (!seen.has(tour.id)) {
+          merged.push(tour);
+          seen.add(tour.id);
+        }
+      }
+      return merged;
+    }
+
+    const tourIds = [...new Set(allCandidates.map((tour) => tour.id))];
+    const userStates = await this.tourUserStateRepository.find({
       where: {
         organizationId,
         userId,
         tourId: In(tourIds),
       },
     });
-    const blockedTourIdSet = new Set<string>();
+
     const now = new Date();
-    for (const state of dismissedStates) {
-      if (state.status !== TourUserStateStatus.DISMISSED && state.status !== TourUserStateStatus.COMPLETED) {
-        continue;
-      }
-      const tour = tours.find((item) => item.id === state.tourId);
-      if (!tour) {
-        blockedTourIdSet.add(state.tourId);
-        continue;
-      }
-      if (state.resetVersion < (tour.currentResetVersion || 0)) {
-        continue;
-      }
-      if (tour.replayPolicy === TourReplayPolicy.ALWAYS_ON_NEW_VERSION) {
-        blockedTourIdSet.add(state.tourId);
-        continue;
-      }
-      if (tour.replayPolicy === TourReplayPolicy.AFTER_PERIOD) {
-        const nextEligibleAt = state.nextEligibleAt
-          ? new Date(state.nextEligibleAt)
-          : this.computeNextEligibleAt(tour, state.updatedAt);
-        if (nextEligibleAt && now < nextEligibleAt) {
-          blockedTourIdSet.add(state.tourId);
+    type TourSources = {
+      tour: GuidedTour;
+      inProductionList: boolean;
+      inSandboxEnvList: boolean;
+      inSandboxTestList: boolean;
+    };
+    const byId = new Map<string, TourSources>();
+
+    const register = (
+      candidates: GuidedTour[],
+      source: Partial<Pick<TourSources, 'inProductionList' | 'inSandboxEnvList' | 'inSandboxTestList'>>,
+    ) => {
+      for (const tour of candidates) {
+        const existing = byId.get(tour.id);
+        if (existing) {
+          Object.assign(existing, {
+            inProductionList: existing.inProductionList || Boolean(source.inProductionList),
+            inSandboxEnvList: existing.inSandboxEnvList || Boolean(source.inSandboxEnvList),
+            inSandboxTestList: existing.inSandboxTestList || Boolean(source.inSandboxTestList),
+          });
+        } else {
+          byId.set(tour.id, {
+            tour,
+            inProductionList: Boolean(source.inProductionList),
+            inSandboxEnvList: Boolean(source.inSandboxEnvList),
+            inSandboxTestList: Boolean(source.inSandboxTestList),
+          });
         }
-        continue;
       }
-      if (tour.replayPolicy === TourReplayPolicy.NEVER) {
-        blockedTourIdSet.add(state.tourId);
+    };
+
+    register(productionTours, { inProductionList: true });
+    register(sandboxTours, { inSandboxEnvList: true });
+    register(sandboxTestProductionTours, { inSandboxTestList: true });
+
+    const merged: GuidedTour[] = [];
+    for (const entry of byId.values()) {
+      if (
+        isTourVisibleInActiveList(entry.tour, userId, userStates, now, runtime, {
+          inProductionList: entry.inProductionList,
+          inSandboxEnvList: entry.inSandboxEnvList,
+          inSandboxTestList: entry.inSandboxTestList,
+        })
+      ) {
+        merged.push(entry.tour);
       }
     }
 
-    return tours.filter((tour) => !blockedTourIdSet.has(tour.id));
+    return merged;
   }
 
   async setTourUserState(
@@ -1337,14 +2577,29 @@ export class GuidedTourService {
     organizationId: string,
     userId: string,
     status: TourUserStateStatus,
+    actor?: TourPermissionActor & { scopes?: TourRuntimeContext['scopes'] },
+    requestedAudience?: TourEnvironment,
   ): Promise<TourUserState> {
     const tour = await this.findById(tourId, organizationId);
+
+    const audienceEnvironment = resolveAudienceForUserStateMutation(
+      tour,
+      actor
+        ? {
+            userId,
+            role: actor.role,
+            scopes: actor.scopes,
+          }
+        : undefined,
+      requestedAudience,
+    );
 
     let entity = await this.tourUserStateRepository.findOne({
       where: {
         tourId,
         organizationId,
         userId,
+        environment: audienceEnvironment,
       },
     });
 
@@ -1353,6 +2608,7 @@ export class GuidedTourService {
         tourId,
         organizationId,
         userId,
+        environment: audienceEnvironment,
         status,
         resetVersion: tour.currentResetVersion || 0,
       });
@@ -1367,13 +2623,17 @@ export class GuidedTourService {
   }
 
   async resetTourAudienceState(tourId: string, organizationId: string): Promise<number> {
-    const tour = await this.findById(tourId, organizationId);
-    const impacted = await this.tourUserStateRepository.count({
-      where: { tourId, organizationId },
-    });
-    tour.currentResetVersion = (tour.currentResetVersion || 0) + 1;
-    await this.tourRepository.save(tour);
-    return impacted;
+    await this.findById(tourId, organizationId);
+    const result = await this.tourUserStateRepository
+      .createQueryBuilder()
+      .delete()
+      .where('tour_id = :tourId', { tourId })
+      .andWhere('organization_id = :organizationId', { organizationId })
+      .andWhere('(environment = :production OR environment IS NULL)', {
+        production: TourEnvironment.PRODUCTION,
+      })
+      .execute();
+    return result.affected ?? 0;
   }
 
   async resetTourStateForUser(tourId: string, organizationId: string, userId: string): Promise<number> {

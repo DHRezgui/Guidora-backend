@@ -12,17 +12,15 @@ async function bootstrap() {
   // Activation du CORS pour communiquer avec le frontend
   app.enableCors({
     origin: [
+      'http://localhost:3000',      // Apps SDK e2e (test_13, etc.)
       'http://localhost:3001',      // Dashboard en local (dev)
       'http://localhost:3003',      // Dashboard via Docker
       'http://localhost:3021',      // Dashboard via docker-compose.dev (host)
-      'http://localhost:5173',      // ReactTest app (default Vite port)
-      'http://localhost:5174',      // ReactTest app (fallback if 5173 taken)
       'http://dashboard:3000',      // Dashboard dans Docker (interne)
-      'http://localhost:3000',      // Pour les tests
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Tour-Audience', 'x-tour-audience'],
   });
   
   // Validation automatique des DTOs

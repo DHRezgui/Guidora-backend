@@ -6,6 +6,7 @@ import { MailService } from '../mail/mail.service';
 
 import { LoginUserDto } from '../user/dto/login-user.dto';
 import { CreateUserDto } from '../user/dto/create-user.dto';
+import { UserRole } from '../user/entities/user.entity';
 
 import { JwtPayload, JwtResponse } from './types/jwt-payload.type';
 import * as crypto from 'crypto';
@@ -22,7 +23,10 @@ export class AuthService {
 
   
   async register(createUserDto: CreateUserDto): Promise<JwtResponse> {
-    const user = await this.userService.create(createUserDto);
+    const user = await this.userService.create({
+      ...createUserDto,
+      role: UserRole.USER,
+    });
 
     // Generate email verification token and send email
     try {

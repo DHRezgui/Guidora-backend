@@ -1,4 +1,4 @@
-﻿import { INestApplication } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppFactory } from './utils/test-app.factory';
@@ -52,7 +52,21 @@ describe('AuthController (e2e)', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.user).toHaveProperty('id');
       expect(response.body.user.email).toBe(registerDto.email);
+      expect(response.body.user.role).toBe('USER');
       expect(response.body.user.password).toBeUndefined(); //  Password non exposé
+    });
+
+    it('should ignore role in register payload and always assign USER', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: `register-role-${Date.now()}@test.com`,
+          password: 'StrongPass123!',
+          role: 'ADMIN',
+        })
+        .expect(201);
+
+      expect(response.body.user.role).toBe('USER');
     });
 
     it('should return 409 if email already exists', async () => {

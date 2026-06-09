@@ -1,5 +1,6 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
+import type { AdminResourceEditLockInfo } from '../../common/admin-resource-edit-lock.util';
 
 export enum PlanType {
   FREE = 'FREE',
@@ -50,7 +51,17 @@ export class Organization {
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt: Date;
 
-  
+  @Column({ type: 'uuid', name: 'edit_locked_by', nullable: true })
+  editLockedBy: string | null;
+
+  @Column({ type: 'timestamptz', name: 'edit_locked_at', nullable: true })
+  editLockedAt: Date | null;
+
+  @Column({ type: 'timestamptz', name: 'edit_lock_expires_at', nullable: true })
+  editLockExpiresAt: Date | null;
+
+  editLock?: AdminResourceEditLockInfo;
+
   @OneToMany(() => User, (user) => user.organization)
   users: User[];
 }

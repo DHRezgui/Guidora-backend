@@ -7,9 +7,14 @@ import { Step } from '../step/entities/step.entity';
 import { GuidedTour } from './entities/guided-tour.entity';
 import { TourUserState } from './entities/tour-user-state.entity';
 import { ContextualFeedbackAggregate } from './entities/contextual-feedback-aggregate.entity';
+import { OrganizationJourneyBlueprint } from './entities/organization-journey-blueprint.entity';
+import { OrganizationJourneyBlueprintAccessGrant } from './entities/organization-journey-blueprint-access-grant.entity';
+import { GuidedTourAccessGrant } from './entities/guided-tour-access-grant.entity';
+import { GuidedTourDeveloperTransfer } from './entities/guided-tour-developer-transfer.entity';
 import { User } from '../user/entities/user.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrganizationModule } from '../organization/organization.module';
+import { ContextualJourneyBlueprintService } from './contextual-journey-blueprint.service';
 
 @Module({
   imports: [
@@ -19,11 +24,25 @@ import { OrganizationModule } from '../organization/organization.module';
       Step,
       User,
       ContextualFeedbackAggregate,
+      OrganizationJourneyBlueprint,
+      OrganizationJourneyBlueprintAccessGrant,
+      GuidedTourAccessGrant,
+      GuidedTourDeveloperTransfer,
     ]),
     OrganizationModule,
   ],
   controllers: [GuidedTourController],
-  providers: [GuidedTourService, ContextualFeedbackService, TourSemanticPythonWorkerService],
-  exports: [GuidedTourService, ContextualFeedbackService, TourSemanticPythonWorkerService],
+  providers: [
+    GuidedTourService,
+    ContextualFeedbackService,
+    TourSemanticPythonWorkerService,
+    ContextualJourneyBlueprintService,
+  ],
+  exports: [
+    GuidedTourService,
+    ContextualFeedbackService,
+    TourSemanticPythonWorkerService,
+    ContextualJourneyBlueprintService,
+  ],
 })
 export class GuidedTourModule {}

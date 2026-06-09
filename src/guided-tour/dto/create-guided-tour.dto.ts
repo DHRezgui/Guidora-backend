@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsNumber, IsObject, IsArray, ValidateNested, IsIn, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsNumber, IsObject, IsArray, ValidateNested, IsIn, Min, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateStepDto } from '../../step/dto/create-step.dto';
-import { TourReplayPolicy } from '../entities/guided-tour.entity';
+import { TourEnvironment, TourReplayPolicy } from '../entities/guided-tour.entity';
 
 
 export class CreateGuidedTourDto {
@@ -100,6 +100,17 @@ export class CreateGuidedTourDto {
   })
   replayAfterDays?: number;
 
+  @IsOptional()
+  @IsString()
+  @IsIn(Object.values(TourEnvironment))
+  @ApiProperty({
+    description: 'Ignored for ADMIN/DEVELOPER (always sandbox on create). Promotion via card switcher.',
+    required: false,
+    enum: TourEnvironment,
+    default: TourEnvironment.PRODUCTION,
+  })
+  environment?: TourEnvironment;
+
   @IsArray({ message: 'Les étapes doivent être un tableau' })
   @ValidateNested({ each: true })
   @Type(() => CreateStepDto)
@@ -108,4 +119,15 @@ export class CreateGuidedTourDto {
     type: [CreateStepDto],
   })
   steps: CreateStepDto[];
+
+  /** Parcours source(s) pour duplication / concaténation (contrôle d’accès). */
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @ApiProperty({
+    description: 'Optional source tour IDs when creating from duplicate or concat',
+    required: false,
+    type: [String],
+  })
+  forkedFromTourIds?: string[];
 }

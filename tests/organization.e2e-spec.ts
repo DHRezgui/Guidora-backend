@@ -1,4 +1,4 @@
-﻿import { INestApplication } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { TestAppFactory } from './utils/test-app.factory';
@@ -138,16 +138,30 @@ describe('OrganizationController (e2e)', () => {
     let devToken: string;
     let devUser: any;
     let testOrgId: string;
+    let otherOrgId: string;
 
     beforeEach(async () => {
       await testData.cleanup();
-      
+
+      const org = await testData.createOrganization({
+        name: 'Dev Access Test',
+        apiKey: `dev-access-key-${Date.now()}`,
+      });
+      testOrgId = org.id;
+
+      const otherOrg = await testData.createOrganization({
+        name: 'Other Organization Hidden',
+        apiKey: `other-org-key-${Date.now()}`,
+      });
+      otherOrgId = otherOrg.id;
+
       devUser = await testData.createUser({
         email: `dev-${Date.now()}@test.com`,
         password: 'DevPass123!',
         role: UserRole.DEVELOPER,
+        organizationId: testOrgId,
       });
-      
+
       const devLoginResp = await request(app.getHttpServer())
         .post('/auth/login')
         .send({
@@ -155,24 +169,21 @@ describe('OrganizationController (e2e)', () => {
           password: 'DevPass123!',
         });
       devToken = devLoginResp.body.access_token;
-
-      const org = await testData.createOrganization({
-        name: 'Dev Access Test',
-        apiKey: `dev-access-key-${Date.now()}`,
-      });
-      testOrgId = org.id;
     });
 
-    it('/organization (GET) should allow DEVELOPER to list organizations', async () => {
+    it('/organization (GET) should return only the developer organization', async () => {
       const response = await request(app.getHttpServer())
         .get('/organization')
         .set('Authorization', `Bearer ${devToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
+      expect(response.body.count).toBe(1);
+      expect(response.body.organizations).toHaveLength(1);
+      expect(response.body.organizations[0].id).toBe(testOrgId);
     });
 
-    it('/organization/:id (GET) should allow DEVELOPER to view organization details', async () => {
+    it('/organization/:id (GET) should allow DEVELOPER to view own organization', async () => {
       const response = await request(app.getHttpServer())
         .get(`/organization/${testOrgId}`)
         .set('Authorization', `Bearer ${devToken}`)
@@ -181,7 +192,14 @@ describe('OrganizationController (e2e)', () => {
       expect(response.body.organization.id).toBe(testOrgId);
     });
 
-    it('/organization/:id/users (GET) should allow DEVELOPER to view users', async () => {
+    it('/organization/:id (GET) should forbid DEVELOPER from viewing another organization', async () => {
+      await request(app.getHttpServer())
+        .get(`/organization/${otherOrgId}`)
+        .set('Authorization', `Bearer ${devToken}`)
+        .expect(403);
+    });
+
+    it('/organization/:id/users (GET) should allow DEVELOPER to view users in own org', async () => {
       // Créer un utilisateur dans l'organisation
       await testData.createUser({
         email: 'dev-user@test.com',

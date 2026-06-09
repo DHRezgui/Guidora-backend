@@ -8,6 +8,8 @@ import { AuthModule } from './auth/auth.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { SdkScopesGuard } from './auth/guards/sdk-scopes.guard';
+import { SdkIntegrationToken } from './auth/entities/sdk-integration-token.entity';
 import { GuidedTourModule } from './guided-tour/guided-tour.module';
 import { StepModule } from './step/step.module';
 import { TrackingModule } from './tracking/tracking.module';
@@ -21,6 +23,10 @@ import { Organization } from './organization/entities/organization.entity';
 import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
 import { TourUserState } from './guided-tour/entities/tour-user-state.entity';
 import { ContextualFeedbackAggregate } from './guided-tour/entities/contextual-feedback-aggregate.entity';
+import { OrganizationJourneyBlueprint } from './guided-tour/entities/organization-journey-blueprint.entity';
+import { OrganizationJourneyBlueprintAccessGrant } from './guided-tour/entities/organization-journey-blueprint-access-grant.entity';
+import { GuidedTourAccessGrant } from './guided-tour/entities/guided-tour-access-grant.entity';
+import { GuidedTourDeveloperTransfer } from './guided-tour/entities/guided-tour-developer-transfer.entity';
 import { Step } from './step/entities/step.entity';
 import { BehaviorEvent } from './tracking/entities/behavior_event.entity';
 import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis.entity';
@@ -48,7 +54,21 @@ import { MlModule } from './ml/ml.module';
       username: process.env.DB_USER || 'admin',
       password: process.env.DB_PASSWORD || 'password123',
       database: process.env.DB_NAME || 'onboarding',
-      entities: [User, Organization, GuidedTour, TourUserState, Step, BehaviorEvent, BehaviorAnalysis, ContextualFeedbackAggregate],
+      entities: [
+        User,
+        Organization,
+        GuidedTour,
+        TourUserState,
+        Step,
+        BehaviorEvent,
+        BehaviorAnalysis,
+        ContextualFeedbackAggregate,
+        OrganizationJourneyBlueprint,
+        OrganizationJourneyBlueprintAccessGrant,
+        GuidedTourAccessGrant,
+        GuidedTourDeveloperTransfer,
+        SdkIntegrationToken,
+      ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',
       uuidExtension: 'pgcrypto',
@@ -70,11 +90,15 @@ import { MlModule } from './ml/ml.module';
   providers: [
     {
       provide: APP_GUARD,
-      useClass: JwtAuthGuard, // Protège toutes les routes par défaut
+      useExisting: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,
-      useClass: RolesGuard,
+      useExisting: RolesGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useExisting: SdkScopesGuard,
     },
   ],
 })

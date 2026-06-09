@@ -8,7 +8,7 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { GuidedTour } from './guided-tour.entity';
+import { GuidedTour, TourEnvironment } from './guided-tour.entity';
 import { User } from '../../user/entities/user.entity';
 
 export enum TourUserStateStatus {
@@ -18,7 +18,7 @@ export enum TourUserStateStatus {
 }
 
 @Entity('tour_user_states')
-@Index('idx_tour_user_states_tour_user_unique', ['tourId', 'userId'], { unique: true })
+@Index('idx_tour_user_states_tour_user_env_unique', ['tourId', 'userId', 'environment'], { unique: true })
 export class TourUserState {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -39,6 +39,14 @@ export class TourUserState {
 
   @Column({ type: 'uuid', name: 'organization_id' })
   organizationId: string;
+
+  @Column({
+    type: 'enum',
+    enum: TourEnvironment,
+    enumName: 'tour_environment',
+    default: TourEnvironment.PRODUCTION,
+  })
+  environment: TourEnvironment;
 
   @Column({
     type: 'enum',
