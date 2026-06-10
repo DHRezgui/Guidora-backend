@@ -25,7 +25,7 @@ export class UpdateUserDto {
   lastName?: string;
 
   @IsOptional()
-  @IsEnum(UserRole, { message: 'Le rôle doit être ADMIN, DEVELOPER ou USER' })
+  @IsEnum(UserRole, { message: 'Le rôle doit être SUPER_ADMIN, ADMIN, DEVELOPER ou USER' })
   @ApiProperty({ description: 'The user\'s role', enum: UserRole, required: false, example: UserRole.USER })
   role?: UserRole;
 

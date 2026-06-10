@@ -1,19 +1,36 @@
-import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../user/entities/user.entity';
 import {
   assertDeveloperOrganizationAccess,
-  getDeveloperOrganizationId,
+  getMembershipOrganizationId,
   shouldListAllOrganizations,
 } from './organization-access.util';
 
 describe('organization-access.util', () => {
-  const orgId = '123e4567-e89b-12d3-a456-426614174000';
+  const orgId = '11111111-1111-1111-1111-111111111111';
 
   describe('assertDeveloperOrganizationAccess', () => {
-    it('allows ADMIN on any organization', () => {
+    it('allows SUPER_ADMIN on any organization', () => {
       expect(() =>
-        assertDeveloperOrganizationAccess({ role: UserRole.ADMIN }, orgId),
+        assertDeveloperOrganizationAccess({ role: UserRole.SUPER_ADMIN }, orgId),
       ).not.toThrow();
+    });
+
+    it('allows ADMIN on own organization', () => {
+      expect(() =>
+        assertDeveloperOrganizationAccess(
+          { role: UserRole.ADMIN, organizationId: orgId },
+          orgId,
+        ),
+      ).not.toThrow();
+    });
+
+    it('denies ADMIN on another organization', () => {
+      expect(() =>
+        assertDeveloperOrganizationAccess(
+          { role: UserRole.ADMIN, organizationId: 'other-org' },
+          orgId,
+        ),
+      ).toThrow('Accès refusé à cette organisation.');
     });
 
     it('allows DEVELOPER on own organization', () => {
@@ -24,45 +41,30 @@ describe('organization-access.util', () => {
         ),
       ).not.toThrow();
     });
-
-    it('forbids DEVELOPER without organization', () => {
-      expect(() =>
-        assertDeveloperOrganizationAccess({ role: UserRole.DEVELOPER }, orgId),
-      ).toThrow(ForbiddenException);
-    });
-
-    it('forbids DEVELOPER on another organization', () => {
-      expect(() =>
-        assertDeveloperOrganizationAccess(
-          { role: UserRole.DEVELOPER, organizationId: 'other-org-id' },
-          orgId,
-        ),
-      ).toThrow(ForbiddenException);
-    });
   });
 
   describe('shouldListAllOrganizations', () => {
-    it('returns true for ADMIN', () => {
-      expect(shouldListAllOrganizations({ role: UserRole.ADMIN })).toBe(true);
-    });
-
-    it('returns false for DEVELOPER', () => {
+    it('returns true only for SUPER_ADMIN', () => {
+      expect(shouldListAllOrganizations({ role: UserRole.SUPER_ADMIN })).toBe(true);
+      expect(shouldListAllOrganizations({ role: UserRole.ADMIN })).toBe(false);
       expect(shouldListAllOrganizations({ role: UserRole.DEVELOPER })).toBe(false);
     });
   });
 
-  describe('getDeveloperOrganizationId', () => {
-    it('returns organizationId for DEVELOPER', () => {
+  describe('getMembershipOrganizationId', () => {
+    it('returns organization for ADMIN and DEVELOPER', () => {
       expect(
-        getDeveloperOrganizationId({
-          role: UserRole.DEVELOPER,
-          organizationId: orgId,
-        }),
+        getMembershipOrganizationId({ role: UserRole.ADMIN, organizationId: orgId }),
+      ).toBe(orgId);
+      expect(
+        getMembershipOrganizationId({ role: UserRole.DEVELOPER, organizationId: orgId }),
       ).toBe(orgId);
     });
 
-    it('returns null for ADMIN', () => {
-      expect(getDeveloperOrganizationId({ role: UserRole.ADMIN, organizationId: orgId })).toBeNull();
+    it('returns null for SUPER_ADMIN', () => {
+      expect(
+        getMembershipOrganizationId({ role: UserRole.SUPER_ADMIN, organizationId: orgId }),
+      ).toBeNull();
     });
   });
 });

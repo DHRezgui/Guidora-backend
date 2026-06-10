@@ -1,12 +1,13 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   HttpException,
   HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -26,6 +27,16 @@ import {
   renewAdminResourceEditLockAtomic,
   userAdminEditRequiresLock,
 } from '../common/admin-resource-edit-lock.util';
+import {
+  assertCanAssignUserRole,
+  assertTargetUserInActorScope,
+  canManagePlatformAdmins,
+  canManageTeamMembers,
+  isOrgAdmin,
+  isSuperAdmin,
+  TEAM_MEMBER_ROLES,
+  type MembershipActor,
+} from '../common/membership-roles.util';
 
 @Injectable()
 export class UserService {
@@ -127,6 +138,40 @@ export class UserService {
     );
   }
   
+  async createForActor(
+    actor: MembershipActor & { id: string },
+    createUserDto: CreateUserDto,
+  ): Promise<UserResponse> {
+    if (!canManagePlatformAdmins(actor) && !canManageTeamMembers(actor)) {
+      throw new ForbiddenException('Accès refusé.');
+    }
+
+    const payload: CreateUserDto = { ...createUserDto };
+
+    if (isSuperAdmin(actor.role)) {
+      payload.role = UserRole.ADMIN;
+      if (!payload.organizationId && !payload.organizationName) {
+        throw new HttpException(
+          'Une organisation est requise pour le compte administrateur.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    } else if (isOrgAdmin(actor.role)) {
+      if (!actor.organizationId) {
+        throw new ForbiddenException('Aucune organisation associée à cet administrateur.');
+      }
+      payload.organizationId = actor.organizationId;
+      delete payload.organizationName;
+      if (!payload.role) {
+        payload.role = UserRole.USER;
+      }
+    }
+
+    assertCanAssignUserRole(actor, payload.role);
+
+    return this.create(payload);
+  }
+
   // Register et gérer l'assignation 
   async create(createUserDto: CreateUserDto): Promise<UserResponse> {
     // Vérifier si l'email existe déjà
@@ -178,25 +223,43 @@ export class UserService {
   }
 
   // Utilisateurs SANS password
-  async findAll(actorId?: string): Promise<UserResponse[]> {
-    const users = await this.userRepository.find({
-      select: [
-        'id',
-        'email',
-        'firstName',
-        'lastName',
-        'role',
-        'organizationId',
-        'isActive',
-        'emailVerified',
-        'createdAt',
-        'lastLoginAt',
-        'editLockedBy',
-        'editLockedAt',
-        'editLockExpiresAt',
-      ],
-    });
-    return Promise.all(users.map((user) => this.attachEditLockToUser(user, actorId)));
+  async findAll(actor?: MembershipActor & { id?: string }): Promise<UserResponse[]> {
+    const select = [
+      'id',
+      'email',
+      'firstName',
+      'lastName',
+      'role',
+      'organizationId',
+      'isActive',
+      'emailVerified',
+      'createdAt',
+      'lastLoginAt',
+      'editLockedBy',
+      'editLockedAt',
+      'editLockExpiresAt',
+    ] as const;
+
+    if (isSuperAdmin(actor?.role)) {
+      const users = await this.userRepository.find({
+        where: { role: UserRole.ADMIN },
+        select: [...select],
+      });
+      return Promise.all(users.map((user) => this.attachEditLockToUser(user, actor?.id)));
+    }
+
+    if (canManageTeamMembers(actor)) {
+      const users = await this.userRepository.find({
+        where: {
+          organizationId: actor!.organizationId!,
+          role: In([...TEAM_MEMBER_ROLES]),
+        },
+        select: [...select],
+      });
+      return Promise.all(users.map((user) => this.attachEditLockToUser(user, actor!.id)));
+    }
+
+    throw new ForbiddenException('Accès refusé.');
   }
 
   // Utilisateur par ID SANS password
@@ -247,10 +310,16 @@ export class UserService {
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
-    actorId?: string,
+    actor?: MembershipActor & { id: string },
   ): Promise<UserResponse> {
     const user = await this.findUserEntityOrThrow(id);
-    await this.assertUserEditLockForMutation(user, actorId);
+    if (actor) {
+      assertTargetUserInActorScope(actor, user);
+      if (updateUserDto.role) {
+        assertCanAssignUserRole(actor, updateUserDto.role);
+      }
+    }
+    await this.assertUserEditLockForMutation(user, actor?.id);
 
     // Vérifier l'email unique si changement
     if (updateUserDto.email && updateUserDto.email !== user.email) {
@@ -277,19 +346,22 @@ export class UserService {
 
     const updatedUser = await this.userRepository.save(user);
 
-    return this.attachEditLockToUser(updatedUser, actorId);
+    return this.attachEditLockToUser(updatedUser, actor?.id);
   }
 
   // Supprimer avec vérification
-  async delete(id: string, actorId?: string): Promise<void> {
+  async delete(id: string, actor?: MembershipActor & { id: string }): Promise<void> {
     const user = await this.findUserEntityOrThrow(id);
+    if (actor) {
+      assertTargetUserInActorScope(actor, user);
+    }
     const holderDisplayName = user.editLockedBy
       ? await this.loadHolderDisplayName(user.editLockedBy)
       : undefined;
     assertAdminResourceDeleteBlockedWhileEditing(
       user,
       'utilisateur',
-      actorId,
+      actor?.id,
       holderDisplayName,
     );
 
@@ -446,10 +518,13 @@ export class UserService {
   async assignToOrganization(
     userId: string,
     organizationName: string,
-    actorId?: string,
+    actor?: MembershipActor & { id: string },
   ): Promise<UserResponse> {
+    if (!isSuperAdmin(actor?.role)) {
+      throw new ForbiddenException('Seul un super administrateur peut réassigner une organisation.');
+    }
     const user = await this.findUserEntityOrThrow(userId);
-    await this.assertUserEditLockForMutation(user, actorId);
+    await this.assertUserEditLockForMutation(user, actor?.id);
 
     // Trouver l'organisation par nom
     const organizations = await this.organizationService.findAll();
@@ -477,13 +552,19 @@ export class UserService {
     user.organizationId = organization.id;
     const updatedUser = await this.userRepository.save(user);
 
-    return this.attachEditLockToUser(updatedUser, actorId);
+    return this.attachEditLockToUser(updatedUser, actor?.id);
   }
 
   // Désassigner un utilisateur d'une organisation
-  async removeFromOrganization(userId: string, actorId?: string): Promise<UserResponse> {
+  async removeFromOrganization(
+    userId: string,
+    actor?: MembershipActor & { id: string },
+  ): Promise<UserResponse> {
+    if (!isSuperAdmin(actor?.role)) {
+      throw new ForbiddenException('Seul un super administrateur peut retirer une organisation.');
+    }
     const user = await this.findUserEntityOrThrow(userId);
-    await this.assertUserEditLockForMutation(user, actorId);
+    await this.assertUserEditLockForMutation(user, actor?.id);
 
     if (!user.organizationId) {
       throw new HttpException(
@@ -496,7 +577,7 @@ export class UserService {
     user.organizationId = null;
     const updatedUser = await this.userRepository.save(user);
 
-    return this.attachEditLockToUser(updatedUser, actorId);
+    return this.attachEditLockToUser(updatedUser, actor?.id);
   }
 
   // Désassigner tous les users d'une organisation (utile si l'org ferme)

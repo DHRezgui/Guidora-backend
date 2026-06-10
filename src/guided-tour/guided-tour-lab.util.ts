@@ -102,7 +102,18 @@ export function isSdkLabTargetPath(url?: string): boolean {
   return normalizeTourPath(url).includes(SDK_LAB_TARGET_PATH_SEGMENT);
 }
 
-/** Lab SDK : chaque compte publie et déduplique indépendamment sur les mêmes URLs de scénario. */
+/**
+ * Clé de dédup org pour les parcours sandbox autogénérés (même signature logique = une instance).
+ * Le republish transfère la propriété au publisher courant (« qui publie prend »).
+ */
+export function buildContextualSandboxPublishDedupeKey(
+  targetUrl: string,
+  intent: string,
+  flowSignature: string,
+): string {
+  return `${normalizeTourPath(targetUrl)}::${intent}::${flowSignature}`;
+}
+
 export function isSdkLabPublishScopedByCreator(targetUrl?: string): boolean {
   return isSdkLabTargetPath(targetUrl);
 }
@@ -113,7 +124,20 @@ export function buildSdkLabPublishDedupeKey(
   intent: string,
   flowSignature: string,
 ): string {
-  return `${publisherId}::${targetUrl}::${intent}::${flowSignature}`;
+  return `${publisherId}::${normalizeTourPath(targetUrl)}::${intent}::${flowSignature}`;
+}
+
+/** Lab SDK : une instance par créateur ; sandbox prod : une instance par org. */
+export function buildContextualPublishDedupeKey(
+  targetUrl: string,
+  intent: string,
+  flowSignature: string,
+  publisherId?: string,
+): string {
+  if (isSdkLabPublishScopedByCreator(targetUrl) && publisherId) {
+    return buildSdkLabPublishDedupeKey(publisherId, targetUrl, intent, flowSignature);
+  }
+  return buildContextualSandboxPublishDedupeKey(targetUrl, intent, flowSignature);
 }
 
 export function isSdkLabTourOwnedBy(

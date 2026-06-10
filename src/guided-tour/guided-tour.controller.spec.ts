@@ -264,13 +264,15 @@ describe('GuidedTourController', () => {
       };
       mockGuidedTourService.publishContextualDrafts.mockResolvedValue(report);
 
-      const result = await controller.publishContextualDrafts(payload, mockCurrentUser);
+      const res = { status: jest.fn() };
+      const result = await controller.publishContextualDrafts(payload, mockCurrentUser, res);
 
       expect(result).toEqual({
         success: true,
         message: 'Contextual drafts processed successfully',
         report,
       });
+      expect(res.status).not.toHaveBeenCalled();
       expect(service.publishContextualDrafts).toHaveBeenCalledWith(
         payload,
         mockCurrentUser.organizationId,

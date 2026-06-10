@@ -21,7 +21,7 @@ import { ApiAuth } from '../swagger/security-schemas';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import {
   assertDeveloperOrganizationAccess,
-  getDeveloperOrganizationId,
+  getMembershipOrganizationId,
   shouldListAllOrganizations,
 } from './organization-access.util';
 
@@ -30,7 +30,7 @@ export class OrganizationController {
   constructor(private readonly organizationService: OrganizationService) {}
 
   // Create an organization
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiAuth()
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -77,13 +77,13 @@ export class OrganizationController {
   }
 
   // Retrieve all organizations
-  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
     summary: 'List organizations',
-    description: 'Returns all organizations (ADMIN) or the developer\'s own organization only (DEVELOPER, read-only)',
+    description: 'Returns all organizations (SUPER_ADMIN) or the member\'s own organization only (ADMIN/DEVELOPER, read-only)',
   })
   @ApiResponse({ 
     status: 200, 
@@ -146,7 +146,7 @@ export class OrganizationController {
       };
     }
 
-    const developerOrgId = getDeveloperOrganizationId(currentUser);
+    const developerOrgId = getMembershipOrganizationId(currentUser);
     if (!developerOrgId) {
       return {
         success: true,
@@ -164,7 +164,7 @@ export class OrganizationController {
   }
 
   // Retrieve an organization by ID
-  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id')
   @HttpCode(HttpStatus.OK)
@@ -217,7 +217,7 @@ export class OrganizationController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @Post(':id/edit-lock/acquire')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -237,7 +237,7 @@ export class OrganizationController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @Post(':id/edit-lock/renew')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -257,7 +257,7 @@ export class OrganizationController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @Delete(':id/edit-lock')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -274,7 +274,7 @@ export class OrganizationController {
   }
 
   // Retrieve an organization with its users
-  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id/users')
   @HttpCode(HttpStatus.OK)
@@ -345,7 +345,7 @@ export class OrganizationController {
   }
 
   // Count users in an organization
-  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DEVELOPER)
   @ApiAuth()
   @Get(':id/users/count')
   @HttpCode(HttpStatus.OK)
@@ -387,7 +387,7 @@ export class OrganizationController {
   }
 
   // Update an organization
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiAuth()
   @Put(':id')
   @HttpCode(HttpStatus.OK)
@@ -437,7 +437,7 @@ export class OrganizationController {
   }
 
   // Delete an organization
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiAuth()
   @Delete(':id')
   @HttpCode(HttpStatus.OK)

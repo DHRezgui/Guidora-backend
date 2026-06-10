@@ -56,17 +56,6 @@ export class CreateOrganizationDto {
   settings?: Record<string, any>;
 
   @IsOptional()
-  @IsInt({ message: 'Le nombre maximum de tours doit être un entier' })
-  @Min(1, { message: 'Le nombre minimum de tours est 1' })
-  @Max(1000, { message: 'Le nombre maximum de tours est 1000' })
-  @ApiProperty({ 
-    description: 'The maximum number of tours allowed',
-    example: 50,
-    required: false
-  })
-  maxTours?: number;
-
-  @IsOptional()
   @IsInt({ message: 'Le nombre maximum d\'utilisateurs doit être un entier' })
   @Min(1, { message: 'Le nombre minimum d\'utilisateurs est 1' })
   @Max(10000, { message: 'Le nombre maximum d\'utilisateurs est 10000' })

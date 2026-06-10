@@ -1,8 +1,14 @@
 import { 
   Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, ParseUUIDPipe, HttpException,} from '@nestjs/common';
 import { UserService } from './user.service';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserRole } from './entities/user.entity';
+import {
+  assertTargetUserInActorScope,
+  isOrgAdmin,
+  isSuperAdmin,
+} from '../common/membership-roles.util';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
@@ -15,7 +21,27 @@ export class UserController {
   ) {}
 
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiAuth()
+  @ApiOperation({
+    summary: 'Create a user (admin)',
+    description: 'SUPER_ADMIN: any organization. ADMIN: users in own organization only.',
+  })
+  async create(
+    @Body() createUserDto: CreateUserDto,
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const user = await this.userService.createForActor(currentUser, createUserDto);
+    return {
+      success: true,
+      message: 'Utilisateur créé avec succès',
+      user,
+    };
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Get()
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -64,8 +90,10 @@ export class UserController {
     error: 'Forbidden',
     statusCode: 403
   }})      
-  async findAll(@CurrentUser() currentUser: { id: string }) {
-    const users = await this.userService.findAll(currentUser.id);
+  async findAll(
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const users = await this.userService.findAll(currentUser);
     return {
       success: true,
       count: users.length,
@@ -75,7 +103,7 @@ export class UserController {
 
 
   // Users by role
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Get('role/:role')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -117,8 +145,11 @@ export class UserController {
     message: 'Invalid user role',
     error: 'Internal Server Error'
   }})      
-  async findByRole(@Param('role') role: UserRole) {
-    const users = await this.userService.findByRole(role);
+  async findByRole(
+    @Param('role') role: UserRole,
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const users = (await this.userService.findAll(currentUser)).filter((user) => user.role === role);
     return {
       success: true,
       count: users.length,
@@ -127,7 +158,7 @@ export class UserController {
   }
 
   // Active users
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Get('active')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -176,8 +207,10 @@ export class UserController {
     error: 'Forbidden',
     statusCode: 403
   }})
-  async findActiveUsers() {
-    const users = await this.userService.findActiveUsers();
+  async findActiveUsers(
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const users = (await this.userService.findAll(currentUser)).filter((user) => user.isActive);
     return {
       success: true,
       count: users.length,
@@ -228,14 +261,10 @@ export class UserController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser() currentUser: any,
   ) {
-    // Allow ADMIN and DEVELOPER to view any user, or any user to view their own profile
-    if (currentUser.role !== UserRole.ADMIN && 
-        currentUser.role !== UserRole.DEVELOPER && 
-        currentUser.id !== id) {
-      throw new HttpException(
-        'Forbidden',
-        HttpStatus.FORBIDDEN,
-      );
+    if (currentUser.id !== id) {
+      const user = await this.userService.findById(id, currentUser.id);
+      assertTargetUserInActorScope(currentUser, user);
+      return { success: true, user };
     }
 
     const user = await this.userService.findById(id, currentUser.id);
@@ -245,15 +274,17 @@ export class UserController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post(':id/edit-lock/acquire')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
   @ApiOperation({ summary: 'Acquire user edit lock (ADMIN)' })
   async acquireEditLock(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() currentUser: { id: string },
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
   ) {
+    const target = await this.userService.findById(id, currentUser.id);
+    assertTargetUserInActorScope(currentUser, target);
     const result = await this.userService.acquireUserEditLock(id, currentUser.id);
     return {
       success: true,
@@ -262,7 +293,7 @@ export class UserController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Post(':id/edit-lock/renew')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -279,7 +310,7 @@ export class UserController {
     };
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Delete(':id/edit-lock')
   @HttpCode(HttpStatus.OK)
   @ApiAuth()
@@ -337,23 +368,21 @@ export class UserController {
     @Body() updateUserDto: UpdateUserDto,
     @CurrentUser() currentUser: any,
   ) {
-    // Vérifier que l'utilisateur modifie son propre profil OU est ADMIN
-    if (currentUser.id !== id && currentUser.role !== UserRole.ADMIN) {
-      throw new HttpException(
-        'Vous ne pouvez modifier que votre propre profil',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    // Empêcher un utilisateur non-ADMIN de changer son propre rôle
-    if (currentUser.role !== UserRole.ADMIN && updateUserDto.role) {
+    if (currentUser.id !== id) {
+      if (!isSuperAdmin(currentUser.role) && !isOrgAdmin(currentUser.role)) {
+        throw new HttpException(
+          'Vous ne pouvez modifier que votre propre profil',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    } else if (updateUserDto.role && !isSuperAdmin(currentUser.role) && !isOrgAdmin(currentUser.role)) {
       throw new HttpException(
         'Vous ne pouvez pas modifier votre propre rôle',
         HttpStatus.FORBIDDEN,
       );
     }
 
-    const user = await this.userService.update(id, updateUserDto, currentUser.id);
+    const user = await this.userService.update(id, updateUserDto, currentUser);
     return {
       success: true,
       message: 'Utilisateur mis à jour avec succès',
@@ -365,7 +394,7 @@ export class UserController {
 
   
   @ApiAuth()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -391,9 +420,9 @@ export class UserController {
   }})
   async delete(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @CurrentUser() currentUser: { id: string },
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
   ) {
-    await this.userService.delete(id, currentUser.id);
+    await this.userService.delete(id, currentUser);
     return {
       success: true,
       message: 'Utilisateur supprimé avec succès',
@@ -403,7 +432,7 @@ export class UserController {
   // Assign to an organization
   
   @ApiAuth()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @Post(':id/assign-organization')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -457,12 +486,12 @@ export class UserController {
   async assignToOrganization(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('organizationName') organizationName: string,
-    @CurrentUser() currentUser: { id: string },
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
   ) {
     const user = await this.userService.assignToOrganization(
       id,
       organizationName,
-      currentUser.id,
+      currentUser,
     );
     return {
       success: true,
@@ -473,7 +502,7 @@ export class UserController {
 
   // Remove from an organization
   @ApiAuth()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @Post(':id/remove-organization')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ 
@@ -512,9 +541,9 @@ export class UserController {
   }})
   async removeFromOrganization(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() currentUser: { id: string },
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
   ) {
-    const user = await this.userService.removeFromOrganization(id, currentUser.id);
+    const user = await this.userService.removeFromOrganization(id, currentUser);
     return {
       success: true,
       message: 'Utilisateur retiré de l\'organisation avec succès',

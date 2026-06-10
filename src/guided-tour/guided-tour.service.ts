@@ -62,9 +62,11 @@ import {
   isAdminOriginatedTour,
 } from './guided-tour-visibility.util';
 import {
-  buildSdkLabPublishDedupeKey,
-  isSdkLabPublishScopedByCreator,
+  buildContextualPublishDedupeKey,
+  isSdkLabTargetPath,
+  normalizeTourPath,
 } from './guided-tour-lab.util';
+import { resolveContextualPublishDecision } from './contextual-publish-ownership.util';
 import {
   assertCanAdminTransferToProduction,
   assertCanApproveSandboxTour,
@@ -167,6 +169,30 @@ type ActivationPolicyDecision = {
   mode: 'auto' | 'manual_review';
   reason: 'allowed' | 'production_guard';
   environment: string;
+};
+
+type ContextualPublishDetailOutcome =
+  | 'created'
+  | 'activated'
+  | 'rejected'
+  | 'skipped'
+  | 'blocked'
+  | 'refreshed'
+  | 'taken_over';
+
+type ContextualPublishTourState = {
+  environment: string;
+  sandboxStatus: string | null;
+  createdBy?: string | null;
+  assignedToModeration?: boolean;
+};
+
+type ContextualPublishDetail = {
+  draftName: string;
+  outcome: ContextualPublishDetailOutcome;
+  reasons: string[];
+  tourId?: string;
+  tourState?: ContextualPublishTourState;
 };
 
 @Injectable()
@@ -532,7 +558,10 @@ export class GuidedTourService {
     activated: number;
     rejected: number;
     skipped: number;
-    details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }>;
+    blocked: number;
+    refreshed: number;
+    takenOver: number;
+    details: ContextualPublishDetail[];
     monitoring: {
       environment: string;
       activationPolicyMode: 'auto' | 'manual_review';
@@ -553,27 +582,44 @@ export class GuidedTourService {
         })
       : [];
 
-    const dedupeSet = new Set<string>();
+    const contextualTourByDedupeKey = new Map<string, GuidedTour>();
     for (const tour of existingTours) {
       const engineMeta = this.getContextualMeta(tour);
       if (!engineMeta?.intent || !engineMeta?.flowSignature) {
         continue;
       }
-      dedupeSet.add(
-        this.buildPublishDedupeKey(
+      contextualTourByDedupeKey.set(
+        buildContextualPublishDedupeKey(
           tour.targetUrl,
           engineMeta.intent,
           engineMeta.flowSignature,
           tour.createdBy,
         ),
+        tour,
       );
     }
 
-    const details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }> = [];
+    const details: ContextualPublishDetail[] = [];
     let created = 0;
     let activated = 0;
     let rejected = 0;
     let skipped = 0;
+    let blocked = 0;
+    let refreshed = 0;
+    let takenOver = 0;
+    const publisherIsAdmin = isAdminActor(actor);
+    const publisherIsDeveloper = isDeveloperActor(actor);
+    const dryRun = dto.dryRun === true;
+
+    const snapshotTourState = (tour?: GuidedTour): ContextualPublishTourState | undefined =>
+      tour
+        ? {
+            environment: tour.environment,
+            sandboxStatus: tour.sandboxStatus ?? null,
+            createdBy: tour.createdBy ?? null,
+            assignedToModeration: normalizeAssignedAdminIds(tour.assignedAdminIds).length > 0,
+          }
+        : undefined;
 
     for (const draft of dto.drafts) {
       const reasons: string[] = [];
@@ -597,19 +643,40 @@ export class GuidedTourService {
         continue;
       }
 
-      const dedupeKey = this.buildPublishDedupeKey(
+      const dedupeKey = buildContextualPublishDedupeKey(
         draft.targetUrl,
         intent,
         flowSignature,
         createdBy,
       );
-      if (dedupeSet.has(dedupeKey)) {
-        skipped += 1;
-        details.push({ draftName: draft.name, outcome: 'skipped', reasons: ['duplicate_signature'] });
+      const existingContextualTour = contextualTourByDedupeKey.get(dedupeKey);
+      const publishDecision = resolveContextualPublishDecision({
+        existingTour: existingContextualTour,
+        publisherId: createdBy,
+        publisherIsAdmin,
+        publisherIsDeveloper,
+      });
+
+      if (publishDecision.action === 'block') {
+        blocked += 1;
+        details.push({
+          draftName: draft.name,
+          outcome: 'blocked',
+          reasons: [publishDecision.reason],
+          tourId: existingContextualTour?.id,
+          tourState: snapshotTourState(existingContextualTour),
+        });
         continue;
       }
 
-      const version = this.computeNextVersion(existingTours, draft.targetUrl, intent, createdBy);
+      const version = existingContextualTour
+        ? (this.getContextualMeta(existingContextualTour)?.version ?? 0) + 1
+        : this.computeNextContextualSandboxVersion(
+            existingTours,
+            draft.targetUrl,
+            intent,
+            createdBy,
+          );
       const shouldActivate =
         activationPolicy.effectiveAutoActivate &&
         draft.confidence >= threshold.activationConfidence &&
@@ -628,71 +695,139 @@ export class GuidedTourService {
         outcomeReasons.push(...quality.semanticCompensationReasons);
       }
 
-      const tour = await this.create(
-        {
-          name: draft.name,
-          description: draft.description,
-          targetUrl: draft.targetUrl,
-          isActive: shouldActivate,
-          priority: Math.max(0, Math.round(draft.score)),
-          triggerConditions: {
-            source: 'contextual-engine',
-            contextualEngine: {
-              source: 'contextual-engine',
-              status: shouldActivate ? 'active' : 'pending_review',
-              scenario: dto.scenario,
+      const mappedSteps = draft.steps.map((step) => ({
+        title: step.title,
+        content: step.content,
+        targetSelector: step.targetSelector,
+        stepTargetUrl: step.stepTargetUrl,
+        position: this.normalizePosition(step.position),
+        action: this.normalizeAction(step.action),
+        skipAllowed: step.skipAllowed ?? true,
+        highlightElement: step.highlightElement ?? true,
+        stepType: this.normalizeStepType(step.stepType),
+      }));
+
+      let tour: GuidedTour;
+      let detailOutcome: 'created' | 'activated' | 'refreshed' | 'taken_over';
+      const detailReasons = [...outcomeReasons];
+
+      if (dryRun) {
+        if (publishDecision.action === 'refresh') {
+          detailOutcome = 'refreshed';
+          refreshed += 1;
+          tour = existingContextualTour!;
+        } else if (publishDecision.action === 'takeover') {
+          detailOutcome = 'taken_over';
+          takenOver += 1;
+          detailReasons.push('ownership_transferred');
+          tour = existingContextualTour!;
+        } else {
+          detailOutcome = shouldActivate ? 'activated' : 'created';
+          created += 1;
+          tour = {
+            ...(existingContextualTour ?? ({} as GuidedTour)),
+            id: existingContextualTour?.id ?? `dry-run-${dedupeKey}`,
+            name: draft.name,
+            targetUrl: draft.targetUrl,
+            environment: existingContextualTour?.environment,
+            sandboxStatus: existingContextualTour?.sandboxStatus ?? null,
+          } as GuidedTour;
+        }
+
+        if (shouldActivate) {
+          activated += 1;
+        }
+
+        details.push({
+          draftName: draft.name,
+          outcome: detailOutcome,
+          reasons: detailReasons,
+          tourId: existingContextualTour?.id ?? tour.id,
+          tourState: snapshotTourState(existingContextualTour ?? tour),
+        });
+        continue;
+      }
+
+      if (publishDecision.action === 'refresh') {
+        tour = await this.refreshContextualTourInPlace({
+          existingTour: existingContextualTour!,
+          draft,
+          dto,
+          intent,
+          flowSignature,
+          version,
+          shouldActivate,
+          activationPolicy,
+          mappedSteps,
+          actor,
+        });
+        detailOutcome = 'refreshed';
+        refreshed += 1;
+      } else if (publishDecision.action === 'takeover') {
+        tour = await this.takeoverContextualTourForAdmin({
+          existingTour: existingContextualTour!,
+          draft,
+          dto,
+          intent,
+          flowSignature,
+          version,
+          shouldActivate,
+          activationPolicy,
+          mappedSteps,
+          publisherId: createdBy ?? '',
+          actor,
+        });
+        detailOutcome = 'taken_over';
+        takenOver += 1;
+        detailReasons.push('ownership_transferred');
+      } else {
+        tour = await this.create(
+          {
+            name: draft.name,
+            description: draft.description,
+            targetUrl: draft.targetUrl,
+            isActive: shouldActivate,
+            priority: Math.max(0, Math.round(draft.score)),
+            triggerConditions: this.buildContextualPublishTriggerConditions({
+              draft,
+              dto,
               intent,
-              confidence: draft.confidence,
-              score: draft.score,
-              flowVersion: draft.flowVersioning.flowVersion,
               flowSignature,
               version,
-              publishedByRole: actor?.role,
-              activationPolicy: {
-                mode: activationPolicy.mode,
-                reason: activationPolicy.reason,
-                requestedAutoActivate: activationPolicy.requestedAutoActivate,
-                effectiveAutoActivate: activationPolicy.effectiveAutoActivate,
-                environment: activationPolicy.environment,
-              },
-              explainability: draft.explainability ?? {},
-              diagnostics: draft.diagnostics ?? {},
-              metadata: draft.metadata ?? {},
-              persistedAt: new Date().toISOString(),
-            },
+              shouldActivate,
+              activationPolicy,
+              actor,
+            }),
+            simulationContext: this.extractSimulationContext(draft.metadata),
+            steps: mappedSteps,
           },
-          simulationContext: this.extractSimulationContext(draft.metadata),
-          steps: draft.steps.map((step) => ({
-            title: step.title,
-            content: step.content,
-            targetSelector: step.targetSelector,
-            stepTargetUrl: step.stepTargetUrl,
-            position: this.normalizePosition(step.position),
-            action: this.normalizeAction(step.action),
-            skipAllowed: step.skipAllowed ?? true,
-            highlightElement: step.highlightElement ?? true,
-            stepType: this.normalizeStepType(step.stepType),
-          })),
-        },
-        organizationId,
-        createdBy,
-        actor,
-      );
+          organizationId,
+          createdBy,
+          actor,
+        );
+        detailOutcome = shouldActivate ? 'activated' : 'created';
+        created += 1;
+      }
 
-      created += 1;
       if (shouldActivate) {
         activated += 1;
       }
 
       details.push({
         draftName: draft.name,
-        outcome: shouldActivate ? 'activated' : 'created',
-        reasons: outcomeReasons,
+        outcome: detailOutcome,
+        reasons: detailReasons,
         tourId: tour.id,
+        tourState: snapshotTourState(tour),
       });
 
-      dedupeSet.add(dedupeKey);
-      existingTours.push(tour);
+      contextualTourByDedupeKey.set(dedupeKey, tour);
+      const existingIndex = existingTours.findIndex((item) => item.id === tour.id);
+      if (existingIndex >= 0) {
+        existingTours[existingIndex] = tour;
+      } else {
+        existingTours.push(tour);
+      }
     }
 
     return {
@@ -701,6 +836,9 @@ export class GuidedTourService {
       activated,
       rejected,
       skipped,
+      blocked,
+      refreshed,
+      takenOver,
       details,
       monitoring: {
         environment: activationPolicy.environment,
@@ -1160,19 +1298,20 @@ export class GuidedTourService {
     return Object.values(StepType).includes(stepType) ? stepType : StepType.HIGHLIGHT;
   }
 
-  private computeNextVersion(
+  private computeNextContextualSandboxVersion(
     existingTours: GuidedTour[],
     targetUrl: string,
     intent: string,
     publisherId?: string,
   ): number {
     let maxVersion = 0;
-    const scopeByCreator = isSdkLabPublishScopedByCreator(targetUrl);
+    const normalizedTarget = normalizeTourPath(targetUrl);
+    const scopeByPublisher = isSdkLabTargetPath(targetUrl) && Boolean(publisherId);
     for (const tour of existingTours) {
-      if (tour.targetUrl !== targetUrl) {
+      if (normalizeTourPath(tour.targetUrl) !== normalizedTarget) {
         continue;
       }
-      if (scopeByCreator && publisherId && tour.createdBy !== publisherId) {
+      if (scopeByPublisher && tour.createdBy !== publisherId) {
         continue;
       }
       const meta = this.getContextualMeta(tour);
@@ -1186,16 +1325,233 @@ export class GuidedTourService {
     return maxVersion + 1;
   }
 
-  private buildPublishDedupeKey(
-    targetUrl: string,
-    intent: string,
-    flowSignature: string,
-    publisherId?: string | null,
-  ): string {
-    if (isSdkLabPublishScopedByCreator(targetUrl) && publisherId) {
-      return buildSdkLabPublishDedupeKey(publisherId, targetUrl, intent, flowSignature);
+  private buildContextualPublishTriggerConditions(params: {
+    draft: ContextualSuggestedDraftDto;
+    dto: PublishContextualDraftsDto;
+    intent: string;
+    flowSignature: string;
+    version: number;
+    shouldActivate: boolean;
+    activationPolicy: ActivationPolicyDecision;
+    actor?: TourPermissionActor;
+  }): Record<string, unknown> {
+    const { draft, dto, intent, flowSignature, version, shouldActivate, activationPolicy, actor } = params;
+    return {
+      source: 'contextual-engine',
+      contextualEngine: {
+        source: 'contextual-engine',
+        status: shouldActivate ? 'active' : 'pending_review',
+        scenario: dto.scenario,
+        intent,
+        confidence: draft.confidence,
+        score: draft.score,
+        flowVersion: draft.flowVersioning.flowVersion,
+        flowSignature,
+        version,
+        publishedByRole: actor?.role,
+        activationPolicy: {
+          mode: activationPolicy.mode,
+          reason: activationPolicy.reason,
+          requestedAutoActivate: activationPolicy.requestedAutoActivate,
+          effectiveAutoActivate: activationPolicy.effectiveAutoActivate,
+          environment: activationPolicy.environment,
+        },
+        explainability: draft.explainability ?? {},
+        diagnostics: draft.diagnostics ?? {},
+        metadata: draft.metadata ?? {},
+        persistedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  private async replaceContextualTourSteps(
+    existingTour: GuidedTour,
+    mappedSteps: CreateGuidedTourDto['steps'],
+  ): Promise<void> {
+    const tourId = existingTour.id;
+    if (existingTour.steps?.length) {
+      await this.stepRepository.remove(existingTour.steps);
+    } else {
+      await this.stepRepository.delete({ tourId });
     }
-    return `${targetUrl}::${intent}::${flowSignature}`;
+    existingTour.steps = [];
+
+    if (!mappedSteps.length) {
+      return;
+    }
+
+    await this.stepRepository.insert(
+      mappedSteps.map((stepDto, index) => ({
+        ...stepDto,
+        tourId,
+        orderIndex: index + 1,
+      })),
+    );
+  }
+
+  private async refreshContextualTourInPlace(params: {
+    existingTour: GuidedTour;
+    draft: ContextualSuggestedDraftDto;
+    dto: PublishContextualDraftsDto;
+    intent: string;
+    flowSignature: string;
+    version: number;
+    shouldActivate: boolean;
+    activationPolicy: ActivationPolicyDecision;
+    mappedSteps: CreateGuidedTourDto['steps'];
+    actor?: TourPermissionActor;
+  }): Promise<GuidedTour> {
+    const {
+      existingTour,
+      draft,
+      dto,
+      intent,
+      flowSignature,
+      version,
+      shouldActivate,
+      activationPolicy,
+      mappedSteps,
+      actor,
+    } = params;
+
+    const tourId = existingTour.id;
+    existingTour.name = draft.name;
+    existingTour.description = draft.description;
+    existingTour.priority = Math.max(0, Math.round(draft.score));
+    existingTour.isActive = shouldActivate;
+    existingTour.triggerConditions = this.buildContextualPublishTriggerConditions({
+      draft,
+      dto,
+      intent,
+      flowSignature,
+      version,
+      shouldActivate,
+      activationPolicy,
+      actor,
+    });
+    existingTour.simulationContext = this.extractSimulationContext(draft.metadata);
+
+    // Moderation state (returned / rejected / assigned admins) is intentionally
+    // left unchanged on SDK refresh — the developer resubmits via the dashboard
+    // when they choose to assign an admin.
+
+    await this.replaceContextualTourSteps(existingTour, mappedSteps);
+    await this.tourRepository.save({
+      id: tourId,
+      name: existingTour.name,
+      description: existingTour.description,
+      priority: existingTour.priority,
+      isActive: existingTour.isActive,
+      triggerConditions: existingTour.triggerConditions,
+      simulationContext: existingTour.simulationContext,
+    });
+
+    return this.tourRepository.findOneOrFail({
+      where: { id: tourId },
+      relations: ['steps'],
+    });
+  }
+
+  private async takeoverContextualTourForAdmin(params: {
+    existingTour: GuidedTour;
+    draft: ContextualSuggestedDraftDto;
+    dto: PublishContextualDraftsDto;
+    intent: string;
+    flowSignature: string;
+    version: number;
+    shouldActivate: boolean;
+    activationPolicy: ActivationPolicyDecision;
+    mappedSteps: CreateGuidedTourDto['steps'];
+    publisherId: string;
+    actor?: TourPermissionActor;
+  }): Promise<GuidedTour> {
+    const {
+      existingTour,
+      draft,
+      dto,
+      intent,
+      flowSignature,
+      version,
+      shouldActivate,
+      activationPolicy,
+      mappedSteps,
+      publisherId,
+      actor,
+    } = params;
+
+    if (!publisherId) {
+      throw new BadRequestException('Publisher id is required for contextual takeover');
+    }
+
+    const tourId = existingTour.id;
+    existingTour.createdBy = publisherId;
+    existingTour.developerPrivate = shouldApplyDeveloperPrivacyOnCreate(actor);
+    existingTour.name = draft.name;
+    existingTour.description = draft.description;
+    existingTour.priority = Math.max(0, Math.round(draft.score));
+    existingTour.isActive = shouldActivate;
+    existingTour.sandboxStatus = TourSandboxStatus.PENDING;
+    existingTour.sandboxRejectionReason = null;
+    existingTour.sandboxRejectedAt = null;
+    existingTour.sandboxRejectedBy = null;
+    existingTour.developerSubmissionMessage = null;
+    existingTour.developerViewShareMessage = null;
+    existingTour.developerViewShareMessageAt = null;
+    existingTour.assignedAdminIds = [];
+    existingTour.assignedToAdminsAt = null;
+    existingTour.inCollaboration = false;
+    existingTour.isSandboxTestActive = false;
+    existingTour.sandboxTestStartedBy = null;
+    existingTour.productionManagedByAdminId = null;
+    existingTour.editLockedBy = null;
+    existingTour.editLockedAt = null;
+    existingTour.editLockExpiresAt = null;
+    existingTour.triggerConditions = this.buildContextualPublishTriggerConditions({
+      draft,
+      dto,
+      intent,
+      flowSignature,
+      version,
+      shouldActivate,
+      activationPolicy,
+      actor,
+    });
+    existingTour.simulationContext = this.extractSimulationContext(draft.metadata);
+
+    await this.accessGrantRepository.delete({ tourId });
+    await this.replaceContextualTourSteps(existingTour, mappedSteps);
+    await this.tourRepository.save({
+      id: tourId,
+      createdBy: existingTour.createdBy,
+      developerPrivate: existingTour.developerPrivate,
+      name: existingTour.name,
+      description: existingTour.description,
+      priority: existingTour.priority,
+      isActive: existingTour.isActive,
+      sandboxStatus: existingTour.sandboxStatus,
+      sandboxRejectionReason: existingTour.sandboxRejectionReason,
+      sandboxRejectedAt: existingTour.sandboxRejectedAt,
+      sandboxRejectedBy: existingTour.sandboxRejectedBy,
+      developerSubmissionMessage: existingTour.developerSubmissionMessage,
+      developerViewShareMessage: existingTour.developerViewShareMessage,
+      developerViewShareMessageAt: existingTour.developerViewShareMessageAt,
+      assignedAdminIds: existingTour.assignedAdminIds,
+      assignedToAdminsAt: existingTour.assignedToAdminsAt,
+      inCollaboration: existingTour.inCollaboration,
+      isSandboxTestActive: existingTour.isSandboxTestActive,
+      sandboxTestStartedBy: existingTour.sandboxTestStartedBy,
+      productionManagedByAdminId: existingTour.productionManagedByAdminId,
+      editLockedBy: existingTour.editLockedBy,
+      editLockedAt: existingTour.editLockedAt,
+      editLockExpiresAt: existingTour.editLockExpiresAt,
+      triggerConditions: existingTour.triggerConditions,
+      simulationContext: existingTour.simulationContext,
+    });
+
+    return this.tourRepository.findOneOrFail({
+      where: { id: tourId },
+      relations: ['steps'],
+    });
   }
 
   private getContextualMeta(tour: GuidedTour): ContextualEngineMeta | undefined {
@@ -1242,9 +1598,7 @@ export class GuidedTourService {
     return null;
   }
 
-  private buildReasonsBreakdown(
-    details: Array<{ draftName: string; outcome: 'created' | 'activated' | 'rejected' | 'skipped'; reasons: string[]; tourId?: string }>,
-  ): Record<string, number> {
+  private buildReasonsBreakdown(details: ContextualPublishDetail[]): Record<string, number> {
     const breakdown: Record<string, number> = {};
     for (const detail of details) {
       for (const reason of detail.reasons) {

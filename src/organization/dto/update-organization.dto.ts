@@ -38,13 +38,6 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(1000)
-  @ApiProperty({ description: 'The maximum number of tours allowed', minimum: 1, maximum: 1000, required: false, example: 100 })
-  maxTours?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
   @Max(10000)
   @ApiProperty({ description: 'The maximum number of users allowed', minimum: 1, maximum: 10000, required: false, example: 500 }) 
   maxUsers?: number;

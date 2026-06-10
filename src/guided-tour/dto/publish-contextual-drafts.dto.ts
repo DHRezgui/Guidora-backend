@@ -203,4 +203,14 @@ export class PublishContextualDraftsDto {
   @IsOptional()
   @ApiProperty({ required: false, default: true })
   autoActivate?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  @ApiProperty({
+    required: false,
+    default: false,
+    description:
+      'When true, evaluates publish decisions without writing tours (used by the SDK panel to refresh status).',
+  })
+  dryRun?: boolean;
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe, Query, BadRequestException, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, UseGuards, ParseUUIDPipe, Query, BadRequestException, Headers, Res } from '@nestjs/common';
 import { TourEnvironment } from './entities/guided-tour.entity';
 import { parseTourAudienceHeader } from './guided-tour-user-state.util';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
@@ -177,6 +177,7 @@ export class GuidedTourController {
   async publishContextualDrafts(
     @Body() publishDto: PublishContextualDraftsDto,
     @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: { status: (code: number) => void },
   ) {
     const organizationId = this.getOrganizationId(user);
     const report = await this.tourService.publishContextualDrafts(
@@ -186,9 +187,15 @@ export class GuidedTourController {
       user,
     );
 
+    if (publishDto.dryRun) {
+      res.status(HttpStatus.OK);
+    }
+
     return {
       success: true,
-      message: 'Contextual drafts processed successfully',
+      message: publishDto.dryRun
+        ? 'Contextual publish preview computed'
+        : 'Contextual drafts processed successfully',
       report,
     };
   }

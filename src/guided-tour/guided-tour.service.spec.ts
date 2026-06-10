@@ -14,6 +14,7 @@ import { PositionType, ActionType } from '../step/enums/tour.enums';
 import { ContextualScenario, PublishContextualDraftsDto } from './dto/publish-contextual-drafts.dto';
 import { UserRole } from '../user/entities/user.entity';
 import { TourEnvironment, TourSandboxStatus } from './entities/guided-tour.entity';
+import { GuidedTourAccessGrant } from './entities/guided-tour-access-grant.entity';
 
 describe('GuidedTourService', () => {
   let service: GuidedTourService;
@@ -32,6 +33,8 @@ describe('GuidedTourService', () => {
   const mockStepRepository = {
     create: jest.fn(),
     save: jest.fn(),
+    insert: jest.fn().mockResolvedValue(undefined),
+    remove: jest.fn().mockResolvedValue(undefined),
     find: jest.fn(),
     delete: jest.fn(),
   };
@@ -47,6 +50,12 @@ describe('GuidedTourService', () => {
 
   const mockUserRepository = {
     find: jest.fn(),
+  };
+
+  const mockAccessGrantRepository = {
+    find: jest.fn().mockResolvedValue([]),
+    delete: jest.fn().mockResolvedValue(undefined),
+    query: jest.fn().mockResolvedValue(undefined),
   };
 
   const mockTourSemanticWorker = {
@@ -139,6 +148,10 @@ describe('GuidedTourService', () => {
         {
           provide: getRepositoryToken(User),
           useValue: mockUserRepository,
+        },
+        {
+          provide: getRepositoryToken(GuidedTourAccessGrant),
+          useValue: mockAccessGrantRepository,
         },
         {
           provide: OrganizationService,
@@ -922,18 +935,33 @@ describe('GuidedTourService', () => {
       expect(createSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip duplicated signature for same route and intent from the same publisher', async () => {
+    it('should refresh pending contextual sandbox tour for the same publisher', async () => {
       const existingTour = {
         ...mockTourEntity,
+        id: 'existing-contextual-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        developerPrivate: true,
         createdBy: userId,
         targetUrl: '/dashboard/sdk-tests/simple',
         triggerConditions: {
+          source: 'contextual-engine',
           contextualEngine: {
+            publishedByRole: 'DEVELOPER',
             intent: 'discovery',
             flowSignature: 'sig-duplicate',
             version: 1,
           },
         },
+        steps: [
+          {
+            id: 'step-existing-1',
+            tourId: 'existing-contextual-tour',
+            orderIndex: 1,
+            title: 'Old step',
+            content: 'Old content',
+          },
+        ],
       };
 
       const publishDto: PublishContextualDraftsDto = {
@@ -962,42 +990,358 @@ describe('GuidedTourService', () => {
         ],
       };
 
+      const existingSteps = existingTour.steps;
       mockOrganizationService.findById.mockResolvedValue({ id: orgId });
       mockTourRepository.find.mockResolvedValue([existingTour]);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+      mockTourRepository.findOneOrFail.mockResolvedValue({
+        ...existingTour,
+        createdBy: userId,
+      } as GuidedTour);
       const createSpy = jest.spyOn(service, 'create');
 
-      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, developerActor);
 
-      expect(result.skipped).toBe(1);
+      expect(result.refreshed).toBe(1);
       expect(result.created).toBe(0);
       expect(createSpy).not.toHaveBeenCalled();
-      expect(result.details[0].reasons).toContain('duplicate_signature');
+      expect(result.details[0].outcome).toBe('refreshed');
+      expect(mockStepRepository.remove).toHaveBeenCalledWith(existingSteps);
+      expect(mockStepRepository.insert).toHaveBeenCalled();
+      expect(mockAccessGrantRepository.delete).not.toHaveBeenCalled();
     });
 
-    it('should allow duplicated lab signature for another publisher in the same organization', async () => {
+    it('should block developer publish when pending tour is owned by admin', async () => {
       const existingTour = {
         ...mockTourEntity,
-        createdBy: 'other-user-id',
-        targetUrl: '/dashboard/sdk-tests/simple',
+        id: 'admin-blueprint-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        createdBy: 'admin-user-id',
+        developerPrivate: false,
+        targetUrl: '/',
         triggerConditions: {
+          source: 'contextual-engine',
           contextualEngine: {
-            intent: 'discovery',
-            flowSignature: 'sig-duplicate',
-            version: 1,
+            publishedByRole: 'ADMIN',
+            intent: 'primary-action',
+            flowSignature: 'sig-chili-blueprint',
+            version: 2,
           },
         },
+        steps: [],
       };
 
       const publishDto: PublishContextualDraftsDto = {
         scenario: ContextualScenario.SIMPLE,
         drafts: [
           {
-            name: 'Duplicate draft for another account',
+            name: 'CHILI POS blueprint',
+            targetUrl: '/',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v3', flowSignature: 'sig-chili-blueprint' },
+            steps: [
+              {
+                title: 'Place order',
+                content: 'Click place order',
+                targetSelector: 'button[data-tour-id="place-order"]',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, developerActor);
+
+      expect(result.blocked).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].outcome).toBe('blocked');
+      expect(result.details[0].reasons).toContain('tour_owned_by_higher_role');
+    });
+
+    it('should allow admin takeover over pending developer-owned contextual tour', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'dev-blueprint-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        createdBy: 'dev-user-id',
+        developerPrivate: true,
+        targetUrl: '/',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'primary-action',
+            flowSignature: 'sig-chili-blueprint',
+            version: 2,
+          },
+        },
+        steps: [],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'CHILI POS blueprint',
+            targetUrl: '/',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v3', flowSignature: 'sig-chili-blueprint' },
+            steps: [
+              {
+                title: 'Place order',
+                content: 'Click place order',
+                targetSelector: 'button[data-tour-id="place-order"]',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+      mockTourRepository.findOneOrFail.mockResolvedValue({
+        ...existingTour,
+        createdBy: userId,
+        developerPrivate: false,
+      } as GuidedTour);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, adminActor);
+
+      expect(result.takenOver).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].outcome).toBe('taken_over');
+      expect(result.details[0].reasons).toContain('ownership_transferred');
+      expect(mockAccessGrantRepository.delete).toHaveBeenCalledWith({ tourId: 'dev-blueprint-tour' });
+    });
+
+    it('should block publish when contextual tour is approved or live', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'approved-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        createdBy: userId,
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'discovery',
+            flowSignature: 'sig-approved',
+            version: 3,
+          },
+        },
+        steps: [],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Approved duplicate',
             targetUrl: '/dashboard/sdk-tests/simple',
             intent: 'discovery',
             confidence: 82,
             score: 87,
-            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-duplicate' },
+            flowVersioning: { flowVersion: 'v4', flowSignature: 'sig-approved' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content 1',
+                targetSelector: '[data-tour-id="tour-simple-title"]',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content 2',
+                targetSelector: '[data-tour-id="tour-simple-cta"] button',
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, developerActor);
+
+      expect(result.blocked).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].reasons).toContain('tour_already_approved_or_live');
+    });
+
+    it('should refresh returned contextual tour for the same owner without changing moderation state', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'returned-contextual-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.RETURNED,
+        developerPrivate: true,
+        createdBy: userId,
+        sandboxRejectionReason: 'Selectors instables',
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'discovery',
+            flowSignature: 'sig-returned',
+            version: 2,
+          },
+        },
+        steps: [{ id: 'step-1', tourId: 'returned-contextual-tour', orderIndex: 1, title: 'Old', content: 'Old' }],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Returned draft',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            intent: 'discovery',
+            confidence: 82,
+            score: 87,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-returned' },
+            steps: [
+              { title: 'Step 1', content: 'Content 1', targetSelector: '[data-tour-id="tour-simple-title"]' },
+              { title: 'Step 2', content: 'Content 2', targetSelector: '[data-tour-id="tour-simple-cta"] button' },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+      mockTourRepository.findOneOrFail.mockResolvedValue(existingTour as GuidedTour);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, developerActor);
+
+      expect(result.refreshed).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].outcome).toBe('refreshed');
+      expect(result.details[0].tourState?.sandboxStatus).toBe(TourSandboxStatus.RETURNED);
+      expect(mockTourRepository.save).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          sandboxStatus: expect.anything(),
+        }),
+      );
+    });
+
+    it('should block developer refresh when pending tour is assigned to admin moderation', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'assigned-pending-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        developerPrivate: true,
+        createdBy: userId,
+        assignedAdminIds: ['admin-user-id'],
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'discovery',
+            flowSignature: 'sig-assigned',
+            version: 1,
+          },
+        },
+        steps: [],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Assigned pending draft',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            intent: 'discovery',
+            confidence: 82,
+            score: 87,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-assigned' },
+            steps: [
+              { title: 'Step 1', content: 'Content 1', targetSelector: '[data-tour-id="tour-simple-title"]' },
+              { title: 'Step 2', content: 'Content 2', targetSelector: '[data-tour-id="tour-simple-cta"] button' },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(publishDto, orgId, userId, developerActor);
+
+      expect(result.blocked).toBe(1);
+      expect(result.refreshed).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].reasons).toContain('tour_awaiting_admin_moderation');
+      expect(result.details[0].tourState?.assignedToModeration).toBe(true);
+    });
+
+    it('should create a separate lab tour for another publisher on the same flow signature', async () => {
+      const firstPublisherId = 'dev-user-a';
+      const secondPublisherId = 'dev-user-b';
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'lab-tour-user-a',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        developerPrivate: true,
+        createdBy: firstPublisherId,
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'discovery',
+            flowSignature: 'sig-shared-lab',
+            version: 1,
+          },
+        },
+        steps: [
+          {
+            id: 'step-a-1',
+            tourId: 'lab-tour-user-a',
+            orderIndex: 1,
+            title: 'Old step',
+            content: 'Old content',
+          },
+        ],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Lab tour user B',
+            targetUrl: '/dashboard/sdk-tests/simple',
+            intent: 'discovery',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-shared-lab' },
             steps: [
               {
                 title: 'Step 1',
@@ -1018,13 +1362,80 @@ describe('GuidedTourService', () => {
       mockTourRepository.find.mockResolvedValue([existingTour]);
       const createSpy = jest
         .spyOn(service, 'create')
-        .mockResolvedValue({ ...mockTourEntity, id: 'new-lab-tour' } as GuidedTour);
+        .mockResolvedValue({ ...mockTourEntity, id: 'lab-tour-user-b' } as GuidedTour);
 
-      const result = await service.publishContextualDrafts(publishDto, orgId, userId);
+      const result = await service.publishContextualDrafts(
+        publishDto,
+        orgId,
+        secondPublisherId,
+        { id: secondPublisherId, role: UserRole.DEVELOPER, authMethod: 'jwt' },
+      );
 
-      expect(result.skipped).toBe(0);
       expect(result.created).toBe(1);
+      expect(result.blocked).toBe(0);
+      expect(result.refreshed).toBe(0);
       expect(createSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should block former owner after developer transfer on returned tour', async () => {
+      const existingTour = {
+        ...mockTourEntity,
+        id: 'transferred-contextual-tour',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.RETURNED,
+        developerPrivate: true,
+        createdBy: 'dev-new-owner',
+        targetUrl: '/',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'primary-action',
+            flowSignature: 'sig-transfer',
+            version: 1,
+          },
+        },
+        steps: [],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Transferred tour draft',
+            targetUrl: '/',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-transfer' },
+            steps: [
+              {
+                title: 'Place order',
+                content: 'Click place order',
+                targetSelector: 'button[data-tour-id="place-order"]',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([existingTour]);
+      const createSpy = jest.spyOn(service, 'create');
+
+      const result = await service.publishContextualDrafts(
+        publishDto,
+        orgId,
+        userId,
+        developerActor,
+      );
+
+      expect(result.blocked).toBe(1);
+      expect(result.created).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(result.details[0].reasons).toContain('tour_owned_by_another_publisher');
+      expect(result.details[0].tourState?.createdBy).toBe('dev-new-owner');
     });
   });
 });

@@ -4,6 +4,7 @@ import { Organization } from '../../organization/entities/organization.entity';
 import type { AdminResourceEditLockInfo } from '../../common/admin-resource-edit-lock.util';
 
 export enum UserRole {
+  SUPER_ADMIN = 'SUPER_ADMIN',
   ADMIN = 'ADMIN',
   DEVELOPER = 'DEVELOPER',
   USER = 'USER',

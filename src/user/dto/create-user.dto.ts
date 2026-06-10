@@ -30,7 +30,7 @@ export class CreateUserDto {
   lastName?: string;
 
   @IsOptional()
-  @IsEnum(UserRole, { message: 'Le rôle doit être ADMIN, DEVELOPER ou USER' })
+  @IsEnum(UserRole, { message: 'Le rôle doit être SUPER_ADMIN, ADMIN, DEVELOPER ou USER' })
   @ApiProperty({ description: 'The user\'s role', enum: UserRole, enumName: 'UserRole', required: false, default: UserRole.USER , example: UserRole.USER })
   role?: UserRole;
 
