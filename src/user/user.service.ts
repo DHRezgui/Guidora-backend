@@ -32,6 +32,7 @@ import {
   assertTargetUserInActorScope,
   canManagePlatformAdmins,
   canManageTeamMembers,
+  isDeveloper,
   isOrgAdmin,
   isSuperAdmin,
   TEAM_MEMBER_ROLES,
@@ -260,6 +261,83 @@ export class UserService {
     }
 
     throw new ForbiddenException('Accès refusé.');
+  }
+
+  /** Autres administrateurs de la même organisation (lecture seule, page Équipe). */
+  async findOrganizationAdminPeers(
+    actor: MembershipActor & { id: string },
+  ): Promise<UserResponse[]> {
+    if (!canManageTeamMembers(actor)) {
+      throw new ForbiddenException('Accès refusé.');
+    }
+
+    const select = [
+      'id',
+      'email',
+      'firstName',
+      'lastName',
+      'role',
+      'organizationId',
+      'isActive',
+      'emailVerified',
+      'createdAt',
+      'lastLoginAt',
+      'editLockedBy',
+      'editLockedAt',
+      'editLockExpiresAt',
+    ] as const;
+
+    const admins = await this.userRepository.find({
+      where: {
+        organizationId: actor.organizationId!,
+        role: UserRole.ADMIN,
+      },
+      select: [...select],
+      order: { firstName: 'ASC', lastName: 'ASC' },
+    });
+
+    const peers = admins.filter((admin) => admin.id !== actor.id);
+    return Promise.all(peers.map((user) => this.attachEditLockToUser(user, actor.id)));
+  }
+
+  /** Annuaire lecture seule pour la page Mon organisation (développeur). */
+  async findOrganizationTeamDirectoryForDeveloper(
+    actor: MembershipActor & { id: string },
+  ): Promise<{ admins: UserResponse[]; developers: UserResponse[] }> {
+    if (!isDeveloper(actor.role) || !actor.organizationId) {
+      throw new ForbiddenException('Accès refusé.');
+    }
+
+    const select = [
+      'id',
+      'email',
+      'firstName',
+      'lastName',
+      'role',
+      'organizationId',
+      'isActive',
+      'emailVerified',
+      'createdAt',
+      'lastLoginAt',
+    ] as const;
+
+    const members = await this.userRepository.find({
+      where: {
+        organizationId: actor.organizationId,
+        role: In([UserRole.ADMIN, UserRole.DEVELOPER]),
+      },
+      select: [...select],
+      order: { firstName: 'ASC', lastName: 'ASC' },
+    });
+
+    return {
+      admins: members
+        .filter((user) => user.role === UserRole.ADMIN)
+        .map((user) => this.toUserResponse(user)),
+      developers: members
+        .filter((user) => user.role === UserRole.DEVELOPER && user.id !== actor.id)
+        .map((user) => this.toUserResponse(user)),
+    };
   }
 
   // Utilisateur par ID SANS password

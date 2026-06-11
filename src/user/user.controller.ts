@@ -218,6 +218,50 @@ export class UserController {
     };
   }
 
+  @Roles(UserRole.DEVELOPER)
+  @Get('organization-team-directory')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({
+    summary: 'Organization team directory',
+    description:
+      'Read-only admins and developer peers for the developer organization page',
+  })
+  async findOrganizationTeamDirectory(
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const directory = await this.userService.findOrganizationTeamDirectoryForDeveloper(currentUser);
+    return {
+      success: true,
+      count: {
+        admins: directory.admins.length,
+        developers: directory.developers.length,
+      },
+      admins: directory.admins,
+      developers: directory.developers,
+    };
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Get('organization-admin-peers')
+  @HttpCode(HttpStatus.OK)
+  @ApiAuth()
+  @ApiOperation({
+    summary: 'Organization admin peers',
+    description:
+      'Returns other ADMIN users in the current organization (read-only team overview)',
+  })
+  async findOrganizationAdminPeers(
+    @CurrentUser() currentUser: { id: string; role?: UserRole; organizationId?: string | null },
+  ) {
+    const users = await this.userService.findOrganizationAdminPeers(currentUser);
+    return {
+      success: true,
+      count: users.length,
+      users,
+    };
+  }
+
   @ApiAuth()
   @Get(':id')
   @HttpCode(HttpStatus.OK)

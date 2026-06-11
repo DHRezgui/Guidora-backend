@@ -140,6 +140,116 @@ export function buildContextualPublishDedupeKey(
   return buildContextualSandboxPublishDedupeKey(targetUrl, intent, flowSignature);
 }
 
+const MANUAL_CONTEXTUAL_DERIVATIVE_SOURCES = new Set([
+  'dashboard-concat',
+  'dashboard-duplicate',
+  'dashboard-fork',
+]);
+
+export function getContextualEngineDerivativeSource(
+  triggerConditions?: Record<string, unknown> | null,
+): string | undefined {
+  const engine = triggerConditions?.contextualEngine;
+  if (!engine || typeof engine !== 'object') {
+    return undefined;
+  }
+  const source = (engine as { source?: unknown }).source;
+  return typeof source === 'string' ? source : undefined;
+}
+
+/** Duplication / concat dashboard : indépendants de la dédup SDK (signature logique). */
+export function isLikelyManualContextualTourDerivative(
+  tour: Pick<GuidedTour, 'name' | 'triggerConditions'>,
+): boolean {
+  const derivativeSource = getContextualEngineDerivativeSource(tour.triggerConditions);
+  if (derivativeSource && MANUAL_CONTEXTUAL_DERIVATIVE_SOURCES.has(derivativeSource)) {
+    return true;
+  }
+
+  const engine = tour.triggerConditions?.contextualEngine;
+  if (engine && typeof engine === 'object') {
+    const canonical = (engine as { canonicalPublishInstance?: unknown }).canonicalPublishInstance;
+    if (canonical === false) {
+      return true;
+    }
+    const forkedFromTourIds = (engine as { forkedFromTourIds?: unknown }).forkedFromTourIds;
+    if (Array.isArray(forkedFromTourIds) && forkedFromTourIds.length > 0) {
+      return true;
+    }
+  }
+
+  const normalizedName = (tour.name ?? '').trim().toLowerCase();
+  if (normalizedName.startsWith('concat -')) {
+    return true;
+  }
+  if (normalizedName.includes('(copie)')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Seules les instances canoniques SDK (publish contextual) participent à la dédup org.
+ * Les copies / concats dashboard restent des parcours indépendants.
+ */
+export function participatesInContextualPublishDedupe(
+  tour: Pick<GuidedTour, 'name' | 'triggerConditions'>,
+): boolean {
+  if (isLikelyManualContextualTourDerivative(tour)) {
+    return false;
+  }
+
+  const triggerConditions = tour.triggerConditions;
+  if (!triggerConditions || typeof triggerConditions !== 'object') {
+    return false;
+  }
+  if (triggerConditions.source !== 'contextual-engine') {
+    return false;
+  }
+
+  const engine = triggerConditions.contextualEngine;
+  if (!engine || typeof engine !== 'object') {
+    return false;
+  }
+
+  const flowSignature = (engine as { flowSignature?: unknown }).flowSignature;
+  const intent = (engine as { intent?: unknown }).intent;
+  return (
+    typeof flowSignature === 'string' &&
+    flowSignature.length > 0 &&
+    typeof intent === 'string' &&
+    intent.length > 0
+  );
+}
+
+export function markTriggerConditionsAsManualDerivative(
+  triggerConditions: Record<string, unknown> | undefined,
+  derivativeSource: 'dashboard-fork' | 'dashboard-duplicate' | 'dashboard-concat',
+  options?: { forkedFromTourIds?: string[] },
+): Record<string, unknown> {
+  const base = { ...(triggerConditions ?? {}) };
+  const engine = base.contextualEngine;
+  const contextualEngine =
+    engine && typeof engine === 'object'
+      ? { ...(engine as Record<string, unknown>) }
+      : {};
+
+  return {
+    ...base,
+    source: typeof base.source === 'string' ? base.source : 'contextual-engine',
+    contextualEngine: {
+      ...contextualEngine,
+      source: derivativeSource,
+      canonicalPublishInstance: false,
+      ...(options?.forkedFromTourIds?.length
+        ? { forkedFromTourIds: [...new Set(options.forkedFromTourIds)] }
+        : {}),
+      derivedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export function isSdkLabTourOwnedBy(
   tour: TourLabEligibility & Pick<GuidedTour, 'createdBy'>,
   userId?: string,

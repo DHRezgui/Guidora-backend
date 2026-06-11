@@ -1301,6 +1301,69 @@ describe('GuidedTourService', () => {
       expect(result.details[0].tourState?.assignedToModeration).toBe(true);
     });
 
+    it('should create a new contextual tour when only a dashboard copy shares the flow signature', async () => {
+      const duplicateCopyTour = {
+        ...mockTourEntity,
+        id: 'duplicate-copy-tour',
+        name: 'Parcours d action principale (copie)',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+        developerPrivate: true,
+        createdBy: userId,
+        assignedAdminIds: ['admin-1'],
+        targetUrl: '/',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            publishedByRole: 'DEVELOPER',
+            intent: 'primary-action',
+            flowSignature: 'sig-place-order',
+            version: 1,
+          },
+        },
+        steps: [],
+      };
+
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Parcours d action principale - Place Order',
+            targetUrl: '/',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-place-order' },
+            steps: [
+              {
+                title: 'Place order',
+                content: 'Click place order',
+                targetSelector: 'button[data-tour-id="place-order"]',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([duplicateCopyTour]);
+      const createSpy = jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({ ...mockTourEntity, id: 'fresh-autogen-tour' } as GuidedTour);
+
+      const result = await service.publishContextualDrafts(
+        publishDto,
+        orgId,
+        userId,
+        developerActor,
+      );
+
+      expect(result.created).toBe(1);
+      expect(result.blocked).toBe(0);
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('should create a separate lab tour for another publisher on the same flow signature', async () => {
       const firstPublisherId = 'dev-user-a';
       const secondPublisherId = 'dev-user-b';

@@ -63,8 +63,11 @@ import {
 } from './guided-tour-visibility.util';
 import {
   buildContextualPublishDedupeKey,
+  getContextualEngineDerivativeSource,
   isSdkLabTargetPath,
+  markTriggerConditionsAsManualDerivative,
   normalizeTourPath,
+  participatesInContextualPublishDedupe,
 } from './guided-tour-lab.util';
 import { resolveContextualPublishDecision } from './contextual-publish-ownership.util';
 import {
@@ -584,6 +587,9 @@ export class GuidedTourService {
 
     const contextualTourByDedupeKey = new Map<string, GuidedTour>();
     for (const tour of existingTours) {
+      if (!participatesInContextualPublishDedupe(tour)) {
+        continue;
+      }
       const engineMeta = this.getContextualMeta(tour);
       if (!engineMeta?.intent || !engineMeta?.flowSignature) {
         continue;
@@ -1314,6 +1320,9 @@ export class GuidedTourService {
       if (scopeByPublisher && tour.createdBy !== publisherId) {
         continue;
       }
+      if (!participatesInContextualPublishDedupe(tour)) {
+        continue;
+      }
       const meta = this.getContextualMeta(tour);
       if (!meta || (meta.intent ?? 'discovery') !== intent) {
         continue;
@@ -1340,6 +1349,7 @@ export class GuidedTourService {
       source: 'contextual-engine',
       contextualEngine: {
         source: 'contextual-engine',
+        canonicalPublishInstance: true,
         status: shouldActivate ? 'active' : 'pending_review',
         scenario: dto.scenario,
         intent,
@@ -1636,6 +1646,21 @@ export class GuidedTourService {
       createTourDto;
     const { environment, sandboxStatus } = resolveCreateTourEnvironment(createTourDto, actor);
 
+    let triggerConditions = createTourDto.triggerConditions || {};
+    if (forkedFromTourIds.length > 0) {
+      const derivativeSource =
+        getContextualEngineDerivativeSource(triggerConditions) === 'dashboard-concat'
+          ? 'dashboard-concat'
+          : forkedFromTourIds.length > 1
+            ? 'dashboard-concat'
+            : 'dashboard-fork';
+      triggerConditions = markTriggerConditionsAsManualDerivative(
+        triggerConditions,
+        derivativeSource,
+        { forkedFromTourIds },
+      );
+    }
+
     // Créer le tour (sans les steps pour éviter cascade avec orderIndex null)
     const tour = this.tourRepository.create({
       ...tourData,
@@ -1647,7 +1672,7 @@ export class GuidedTourService {
       assignedAdminIds: [],
       assignedToAdminsAt: null,
       inCollaboration: false,
-      triggerConditions: createTourDto.triggerConditions || {},
+      triggerConditions,
       simulationContext: createTourDto.simulationContext,
       replayPolicy: createTourDto.replayPolicy ?? TourReplayPolicy.NEVER,
       replayAfterDays: createTourDto.replayAfterDays ?? 0,

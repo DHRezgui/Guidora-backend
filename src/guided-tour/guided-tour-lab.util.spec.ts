@@ -10,7 +10,9 @@ import {
   isSdkLabPublishedTour,
   isSdkLabTargetPath,
   isSdkLabTemplateTour,
+  isLikelyManualContextualTourDerivative,
   isSdkLabTourOwnedBy,
+  participatesInContextualPublishDedupe,
 } from './guided-tour-lab.util';
 import { TourEnvironment, TourSandboxStatus } from './entities/guided-tour.entity';
 
@@ -95,6 +97,70 @@ describe('isSdkLabPublishedTour', () => {
         triggerConditions: {},
       }),
     ).toBe(false);
+  });
+});
+
+describe('contextual publish dedupe participation', () => {
+  const canonicalTour = {
+    name: 'Parcours SDK',
+    triggerConditions: {
+      source: 'contextual-engine',
+      contextualEngine: {
+        source: 'contextual-engine',
+        canonicalPublishInstance: true,
+        intent: 'primary-action',
+        flowSignature: 'sig-1',
+      },
+    },
+  };
+
+  it('includes canonical SDK publish instances', () => {
+    expect(participatesInContextualPublishDedupe(canonicalTour)).toBe(true);
+  });
+
+  it('excludes dashboard concat derivatives', () => {
+    expect(
+      participatesInContextualPublishDedupe({
+        name: 'Concat - A + B',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            source: 'dashboard-concat',
+            intent: 'primary-action',
+            flowSignature: 'sig-1',
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('excludes duplicate copies by name and fork metadata', () => {
+    expect(
+      participatesInContextualPublishDedupe({
+        name: 'Parcours d action (copie)',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            intent: 'primary-action',
+            flowSignature: 'sig-1',
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isLikelyManualContextualTourDerivative({
+        name: 'Parcours SDK',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: {
+            source: 'dashboard-fork',
+            forkedFromTourIds: ['tour-a'],
+            intent: 'primary-action',
+            flowSignature: 'sig-1',
+          },
+        },
+      }),
+    ).toBe(true);
   });
 });
 
