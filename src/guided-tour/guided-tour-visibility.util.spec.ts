@@ -5,6 +5,7 @@ import {
   isDeveloperOriginatedTour,
   isPendingVisibleToAdmin,
   isTourSharingLockedByDeveloperApproval,
+  resolveContextualPublishedByRole,
 } from './guided-tour-visibility.util';
 import { canActorViewTourWithGrants, resolveEditorAccessMode } from './guided-tour-access.util';
 import { canAdminTransferTourEnvironment } from './guided-tour-permissions.util';
@@ -98,6 +99,23 @@ describe('isDeveloperOriginatedTour', () => {
       }),
     ).toBe(false);
   });
+
+  it('returns true for legacy SDK_TOKEN publish with moderation history', () => {
+    expect(
+      isDeveloperOriginatedTour({
+        createdBy: 'dev-1',
+        developerPrivate: false,
+        assignedAdminIds: ['admin-1'],
+        environment: TourEnvironment.PRODUCTION,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        targetUrl: '/dashboard/sdk-tests/simple',
+        triggerConditions: {
+          source: 'contextual-engine',
+          contextualEngine: { publishedByRole: 'SDK_TOKEN' },
+        },
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('admin vs developer moderation flow', () => {
@@ -183,6 +201,25 @@ describe('admin vs developer moderation flow', () => {
     ).toBe('admin');
   });
 
+  it('keeps moderating admin in admin edit mode for legacy SDK_TOKEN dev production tours', () => {
+    const legacySdkProdTour = {
+      createdBy: 'dev-1',
+      developerPrivate: false,
+      assignedAdminIds: ['admin-1'],
+      environment: TourEnvironment.PRODUCTION,
+      sandboxStatus: TourSandboxStatus.APPROVED,
+      targetUrl: '/dashboard/sdk-tests/simple',
+      triggerConditions: {
+        source: 'contextual-engine',
+        contextualEngine: { publishedByRole: 'SDK_TOKEN' },
+      },
+    };
+    expect(isAdminOriginatedTour(legacySdkProdTour)).toBe(false);
+    expect(
+      resolveEditorAccessMode(legacySdkProdTour, { id: 'admin-1', role: UserRole.ADMIN }),
+    ).toBe('admin');
+  });
+
   it('marks admin sandbox tours as private to owner until production', () => {
     const adminSandbox = {
       createdBy: 'admin-1',
@@ -206,6 +243,23 @@ describe('admin vs developer moderation flow', () => {
         { id: 'admin-2', role: UserRole.ADMIN },
       ),
     ).toBe(true);
+  });
+});
+
+describe('resolveContextualPublishedByRole', () => {
+  it('maps SDK token actor to creator role', () => {
+    expect(
+      resolveContextualPublishedByRole(
+        { id: 'dev-1', role: 'SDK_TOKEN', authMethod: 'sdk_token' },
+        UserRole.DEVELOPER,
+      ),
+    ).toBe('DEVELOPER');
+    expect(
+      resolveContextualPublishedByRole(
+        { id: 'admin-1', role: 'SDK_TOKEN', authMethod: 'sdk_token' },
+        UserRole.ADMIN,
+      ),
+    ).toBe('ADMIN');
   });
 });
 

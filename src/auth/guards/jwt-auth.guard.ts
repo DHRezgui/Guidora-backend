@@ -7,13 +7,16 @@ import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { SdkIntegrationTokenService } from '../sdk-integration-token.service';
+import { SdkSessionTokenService } from '../sdk-session-token.service';
 import { SDK_TOKEN_PREFIX } from '../sdk-token-scopes';
+import { SDK_SESSION_TOKEN_PREFIX } from '../sdk-token-lifecycle.constants';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(
     private reflector: Reflector,
     private sdkIntegrationTokenService: SdkIntegrationTokenService,
+    private sdkSessionTokenService: SdkSessionTokenService,
   ) {
     super();
   }
@@ -32,6 +35,14 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     const authHeader = request.headers?.authorization;
     if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
       const bearer = authHeader.slice(7).trim();
+      if (bearer.startsWith(SDK_SESSION_TOKEN_PREFIX)) {
+        const principal = await this.sdkSessionTokenService.validateBearerToken(bearer);
+        if (!principal) {
+          throw new UnauthorizedException('Invalid SDK session token');
+        }
+        request.user = principal;
+        return true;
+      }
       if (bearer.startsWith(SDK_TOKEN_PREFIX)) {
         const principal = await this.sdkIntegrationTokenService.validateBearerToken(bearer);
         if (!principal) {

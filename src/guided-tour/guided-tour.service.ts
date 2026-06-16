@@ -56,6 +56,7 @@ import {
   normalizeAssignedAdminIds,
   hasDeveloperModerationSubmissionHistory,
   resolveDedicatedModeratorAdminId,
+  resolveContextualPublishedByRole,
   shouldApplyDeveloperPrivacyOnCreate,
   isTourSharingLockedByDeveloperApproval,
   isAdminOriginatedProductionTour,
@@ -90,6 +91,7 @@ import {
   isAdminActor,
   isDeveloperActor,
   isDeveloperOwnedSandboxTour,
+  isSdkTokenActor,
   resolveCreateTourEnvironment,
   type TourActivationAudience,
   type TourPermissionActor,
@@ -613,8 +615,16 @@ export class GuidedTourService {
     let blocked = 0;
     let refreshed = 0;
     let takenOver = 0;
-    const publisherIsAdmin = isAdminActor(actor);
-    const publisherIsDeveloper = isDeveloperActor(actor);
+    const publisherCreatorRole = createdBy
+      ? await this.loadUserRole(createdBy)
+      : undefined;
+    const contextualPublishedByRole = resolveContextualPublishedByRole(actor, publisherCreatorRole);
+    const publisherIsAdmin =
+      isAdminActor(actor) ||
+      (isSdkTokenActor(actor) && publisherCreatorRole === UserRole.ADMIN);
+    const publisherIsDeveloper =
+      isDeveloperActor(actor) ||
+      (isSdkTokenActor(actor) && publisherCreatorRole !== UserRole.ADMIN);
     const dryRun = dto.dryRun === true;
 
     const snapshotTourState = (tour?: GuidedTour): ContextualPublishTourState | undefined =>
@@ -802,7 +812,7 @@ export class GuidedTourService {
               version,
               shouldActivate,
               activationPolicy,
-              actor,
+              publishedByRole: contextualPublishedByRole,
             }),
             simulationContext: this.extractSimulationContext(draft.metadata),
             steps: mappedSteps,
@@ -1342,9 +1352,18 @@ export class GuidedTourService {
     version: number;
     shouldActivate: boolean;
     activationPolicy: ActivationPolicyDecision;
-    actor?: TourPermissionActor;
+    publishedByRole?: string;
   }): Record<string, unknown> {
-    const { draft, dto, intent, flowSignature, version, shouldActivate, activationPolicy, actor } = params;
+    const {
+      draft,
+      dto,
+      intent,
+      flowSignature,
+      version,
+      shouldActivate,
+      activationPolicy,
+      publishedByRole,
+    } = params;
     return {
       source: 'contextual-engine',
       contextualEngine: {
@@ -1358,7 +1377,7 @@ export class GuidedTourService {
         flowVersion: draft.flowVersioning.flowVersion,
         flowSignature,
         version,
-        publishedByRole: actor?.role,
+        publishedByRole,
         activationPolicy: {
           mode: activationPolicy.mode,
           reason: activationPolicy.reason,
@@ -1437,7 +1456,10 @@ export class GuidedTourService {
       version,
       shouldActivate,
       activationPolicy,
-      actor,
+      publishedByRole: resolveContextualPublishedByRole(
+        actor,
+        await this.loadUserRole(existingTour.createdBy ?? undefined),
+      ),
     });
     existingTour.simulationContext = this.extractSimulationContext(draft.metadata);
 
@@ -1494,8 +1516,9 @@ export class GuidedTourService {
     }
 
     const tourId = existingTour.id;
+    const takeoverCreatorRole = await this.loadUserRole(publisherId);
     existingTour.createdBy = publisherId;
-    existingTour.developerPrivate = shouldApplyDeveloperPrivacyOnCreate(actor);
+    existingTour.developerPrivate = shouldApplyDeveloperPrivacyOnCreate(actor, takeoverCreatorRole);
     existingTour.name = draft.name;
     existingTour.description = draft.description;
     existingTour.priority = Math.max(0, Math.round(draft.score));
@@ -1524,7 +1547,7 @@ export class GuidedTourService {
       version,
       shouldActivate,
       activationPolicy,
-      actor,
+      publishedByRole: resolveContextualPublishedByRole(actor, takeoverCreatorRole),
     });
     existingTour.simulationContext = this.extractSimulationContext(draft.metadata);
 
@@ -1645,6 +1668,7 @@ export class GuidedTourService {
     const { steps: stepDtos, environment: _ignoredEnvironment, forkedFromTourIds: _forked, ...tourData } =
       createTourDto;
     const { environment, sandboxStatus } = resolveCreateTourEnvironment(createTourDto, actor);
+    const creatorRole = createdBy ? await this.loadUserRole(createdBy) : undefined;
 
     let triggerConditions = createTourDto.triggerConditions || {};
     if (forkedFromTourIds.length > 0) {
@@ -1668,7 +1692,7 @@ export class GuidedTourService {
       createdBy,
       environment,
       sandboxStatus,
-      developerPrivate: shouldApplyDeveloperPrivacyOnCreate(actor),
+      developerPrivate: shouldApplyDeveloperPrivacyOnCreate(actor, creatorRole),
       assignedAdminIds: [],
       assignedToAdminsAt: null,
       inCollaboration: false,
@@ -2379,6 +2403,17 @@ export class GuidedTourService {
     tour.steps.sort((a, b) => a.orderIndex - b.orderIndex);
     await this.attachEditLockToTour(tour, actor);
     return tour;
+  }
+
+  private async loadUserRole(userId?: string): Promise<UserRole | undefined> {
+    if (!userId) {
+      return undefined;
+    }
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'role'],
+    });
+    return user?.role;
   }
 
   private async loadUserDisplayName(userId: string): Promise<string | undefined> {

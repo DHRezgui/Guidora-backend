@@ -128,6 +128,10 @@ export function isDeveloperActor(actor?: TourPermissionActor): boolean {
   return actor?.role === UserRole.DEVELOPER;
 }
 
+export function isSdkTokenActor(actor?: TourPermissionActor): boolean {
+  return actor?.role === 'SDK_TOKEN';
+}
+
 export function isDeveloperOwnedSandboxTour(
   tour: Pick<GuidedTour, 'createdBy' | 'environment'>,
   userId?: string,
@@ -336,14 +340,14 @@ export function assertAdminCannotSetProductionOnCreate(
 }
 
 /**
- * Création : développeurs et administrateurs démarrent toujours en sandbox (garde-fou).
+ * Création : développeurs, administrateurs et tokens SDK d’intégration démarrent toujours en sandbox.
  * L’approbation workflow valide le parcours en sandbox (approved) ; la promotion prod se fait via le switcher carte (admin).
  */
 export function resolveCreateTourEnvironment(
   createTourDto: CreateGuidedTourDto,
   actor?: TourPermissionActor,
 ): { environment: TourEnvironment; sandboxStatus: TourSandboxStatus | null } {
-  if (isDeveloperActor(actor) || isAdminActor(actor)) {
+  if (isDeveloperActor(actor) || isAdminActor(actor) || isSdkTokenActor(actor)) {
     return {
       environment: TourEnvironment.SANDBOX,
       sandboxStatus: TourSandboxStatus.PENDING,

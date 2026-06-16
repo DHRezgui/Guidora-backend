@@ -8,7 +8,11 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { SdkIntegrationTokenController } from './sdk-integration-token.controller';
 import { SdkIntegrationTokenService } from './sdk-integration-token.service';
+import { SdkIntegrationTokenAuditService } from './sdk-integration-token-audit.service';
+import { SdkSessionTokenService } from './sdk-session-token.service';
 import { SdkIntegrationToken } from './entities/sdk-integration-token.entity';
+import { SdkIntegrationTokenAudit } from './entities/sdk-integration-token-audit.entity';
+import { SdkSessionToken } from './entities/sdk-session-token.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UserModule } from '../user/user.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -21,7 +25,11 @@ import { MailModule } from '../mail/mail.module';
   imports: [
     UserModule,
     MailModule,
-    TypeOrmModule.forFeature([SdkIntegrationToken]),
+    TypeOrmModule.forFeature([
+      SdkIntegrationToken,
+      SdkIntegrationTokenAudit,
+      SdkSessionToken,
+    ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -38,11 +46,21 @@ import { MailModule } from '../mail/mail.module';
   providers: [
     AuthService,
     SdkIntegrationTokenService,
+    SdkIntegrationTokenAuditService,
+    SdkSessionTokenService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,
     SdkScopesGuard,
   ],
-  exports: [AuthService, SdkIntegrationTokenService, JwtAuthGuard, RolesGuard, SdkScopesGuard],
+  exports: [
+    AuthService,
+    SdkIntegrationTokenService,
+    SdkIntegrationTokenAuditService,
+    SdkSessionTokenService,
+    JwtAuthGuard,
+    RolesGuard,
+    SdkScopesGuard,
+  ],
 })
 export class AuthModule {}

@@ -1,7 +1,7 @@
 import { UserRole } from '../../user/entities/user.entity';
 import type { SdkTokenScope } from '../sdk-token-scopes';
 
-export type AuthMethod = 'jwt' | 'sdk_token';
+export type AuthMethod = 'jwt' | 'sdk_token' | 'sdk_session';
 
 export interface RequestAuthUser {
   id: string;
@@ -10,5 +10,6 @@ export interface RequestAuthUser {
   organizationId: string;
   authMethod: AuthMethod;
   sdkTokenId?: string;
+  sdkSessionTokenId?: string;
   scopes?: SdkTokenScope[];
 }

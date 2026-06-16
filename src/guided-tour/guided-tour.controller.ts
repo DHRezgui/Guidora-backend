@@ -30,6 +30,7 @@ import { UpsertOrganizationJourneyBlueprintDto } from './dto/journey-blueprint.d
 import { SetBlueprintAccessGrantsDto } from './dto/set-blueprint-access-grants.dto';
 import { RequireSdkScopes } from '../auth/decorators/require-sdk-scopes.decorator';
 import { AllowSdkScopes } from '../auth/decorators/allow-sdk-scopes.decorator';
+import { AllowDashboardJwtOnSdkRoute } from '../auth/decorators/allow-dashboard-jwt-on-sdk-route.decorator';
 
 @ApiTags('Guided Tour')
 @Controller('tours')
@@ -168,7 +169,8 @@ export class GuidedTourController {
     summary: 'Publish contextual drafts',
     description:
       'Apply quality gates, deduplication and activation policy to SDK contextual drafts. ' +
-      'ADMIN and DEVELOPER (dashboard JWT / lab SDK Tests). SDK integration tokens need tours:publish scope.',
+      'Creates or refreshes tours in sandbox (pending review); production promotion stays on the dashboard. ' +
+      'SDK integration tokens need tours:publish scope (assignable by admin or developer).',
   })
   @ApiResponse({
     status: 201,
@@ -221,6 +223,8 @@ export class GuidedTourController {
     };
   }
 
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @AllowDashboardJwtOnSdkRoute()
   @RequireSdkScopes('blueprints:read')
   @Get('contextual/blueprints/catalog')
   @HttpCode(HttpStatus.OK)

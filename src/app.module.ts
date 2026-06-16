@@ -10,6 +10,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { SdkScopesGuard } from './auth/guards/sdk-scopes.guard';
 import { SdkIntegrationToken } from './auth/entities/sdk-integration-token.entity';
+import { SdkIntegrationTokenAudit } from './auth/entities/sdk-integration-token-audit.entity';
+import { SdkSessionToken } from './auth/entities/sdk-session-token.entity';
 import { GuidedTourModule } from './guided-tour/guided-tour.module';
 import { StepModule } from './step/step.module';
 import { TrackingModule } from './tracking/tracking.module';
@@ -68,6 +70,8 @@ import { MlModule } from './ml/ml.module';
         GuidedTourAccessGrant,
         GuidedTourDeveloperTransfer,
         SdkIntegrationToken,
+        SdkIntegrationTokenAudit,
+        SdkSessionToken,
       ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',

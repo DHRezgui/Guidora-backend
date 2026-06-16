@@ -50,6 +50,7 @@ describe('GuidedTourService', () => {
 
   const mockUserRepository = {
     find: jest.fn(),
+    findOne: jest.fn(),
   };
 
   const mockAccessGrantRepository = {
@@ -129,6 +130,12 @@ describe('GuidedTourService', () => {
     authMethod: 'jwt' as const,
   };
 
+  const sdkTokenActor = {
+    id: userId,
+    role: 'SDK_TOKEN' as const,
+    authMethod: 'sdk_token' as const,
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -167,6 +174,7 @@ describe('GuidedTourService', () => {
     service = module.get<GuidedTourService>(GuidedTourService);
 
     jest.clearAllMocks();
+    mockUserRepository.findOne.mockResolvedValue({ id: userId, role: UserRole.DEVELOPER });
   });
 
   it('should be defined', () => {
@@ -1499,6 +1507,64 @@ describe('GuidedTourService', () => {
       expect(createSpy).not.toHaveBeenCalled();
       expect(result.details[0].reasons).toContain('tour_owned_by_another_publisher');
       expect(result.details[0].tourState?.createdBy).toBe('dev-new-owner');
+    });
+
+    it('should create contextual drafts in sandbox when published via SDK integration token', async () => {
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [
+          {
+            name: 'Client app autogen',
+            targetUrl: '/',
+            intent: 'discovery',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'v1', flowSignature: 'sig-sdk-token' },
+            steps: [
+              {
+                title: 'Step 1',
+                content: 'Content 1',
+                targetSelector: '[data-tour-id="hero"]',
+              },
+              {
+                title: 'Step 2',
+                content: 'Content 2',
+                targetSelector: '[data-tour-id="cta"] button',
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([]);
+      mockTourRepository.create.mockImplementation((payload) => payload);
+      mockTourRepository.save.mockImplementation(async (tour) => ({
+        ...tour,
+        id: 'sdk-contextual-tour',
+      }));
+      mockTourRepository.findOneOrFail.mockResolvedValue({
+        ...mockTourEntity,
+        id: 'sdk-contextual-tour',
+        targetUrl: '/',
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.PENDING,
+      });
+
+      const result = await service.publishContextualDrafts(
+        publishDto,
+        orgId,
+        userId,
+        sdkTokenActor,
+      );
+
+      expect(result.created).toBe(1);
+      expect(mockTourRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environment: TourEnvironment.SANDBOX,
+          sandboxStatus: TourSandboxStatus.PENDING,
+        }),
+      );
     });
   });
 });

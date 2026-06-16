@@ -7,6 +7,35 @@ import { Organization, PlanType } from './../src/organization/entities/organizat
 import { User, UserRole } from './../src/user/entities/user.entity';
 import { ContextualScenario } from './../src/guided-tour/dto/publish-contextual-drafts.dto';
 
+const PUBLISH_PAT_SCOPES = [
+  'tours:runtime',
+  'tours:sandbox',
+  'blueprints:read',
+  'feedback:read',
+  'feedback:write',
+  'semantic:invoke',
+  'tours:publish',
+] as const;
+
+async function createIntegrationPat(
+  server: Parameters<typeof request>[0],
+  sessionJwt: string,
+  scopes: readonly string[] = PUBLISH_PAT_SCOPES,
+): Promise<string> {
+  const created = await request(server)
+    .post('/auth/sdk-tokens')
+    .set('Authorization', `Bearer ${sessionJwt}`)
+    .send({
+      name: `e2e-pat-${Date.now()}`,
+      scopes: [...scopes],
+    })
+    .expect(201);
+
+  const pat = created.body.token as string;
+  expect(pat).toMatch(/^td_sdk_/);
+  return pat;
+}
+
 describe('GuidedTour Contextual Publish (full app e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
@@ -87,12 +116,13 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
       })
       .expect(200);
 
-    const token = loginResp.body.access_token;
-    expect(token).toBeDefined();
+    const sessionJwt = loginResp.body.access_token;
+    expect(sessionJwt).toBeDefined();
+    const publishPat = await createIntegrationPat(app.getHttpServer(), sessionJwt);
 
     const simpleResp = await request(app.getHttpServer())
       .post('/tours/contextual/publish')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${publishPat}`)
       .send({
         scenario: ContextualScenario.SIMPLE,
         drafts: [
@@ -147,7 +177,7 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
 
     const dedupeResp = await request(app.getHttpServer())
       .post('/tours/contextual/publish')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${publishPat}`)
       .send({
         scenario: ContextualScenario.SIMPLE,
         drafts: [
@@ -180,7 +210,7 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
 
     const listResp = await request(app.getHttpServer())
       .get('/tours')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${sessionJwt}`)
       .expect(200);
 
     expect(listResp.body.success).toBe(true);
@@ -189,7 +219,7 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
     expect(listResp.body.tours[0].triggerConditions.contextualEngine.status).toBe('active');
   });
 
-  it('should allow DEVELOPER JWT to publish contextual drafts (SDK lab)', async () => {
+  it('should reject session JWT on contextual publish and allow admin PAT', async () => {
     assertSafeTestDatabase();
 
     await dataSource.query('DELETE FROM "steps"');
@@ -211,14 +241,14 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
       }),
     );
 
-    const devEmail = `dev-lab-${Date.now()}@test.com`;
+    const adminEmail = `dev-lab-admin-${Date.now()}@test.com`;
     await userRepo.save(
       userRepo.create({
-        email: devEmail,
-        password: 'DevPass123!',
+        email: adminEmail,
+        password: 'AdminPass123!',
         firstName: 'Lab',
-        lastName: 'Developer',
-        role: UserRole.DEVELOPER,
+        lastName: 'Admin',
+        role: UserRole.ADMIN,
         organizationId: organization.id,
         isActive: true,
       }),
@@ -226,15 +256,26 @@ describe('GuidedTour Contextual Publish (full app e2e)', () => {
 
     const loginResp = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({ email: devEmail, password: 'DevPass123!' })
+      .send({ email: adminEmail, password: 'AdminPass123!' })
       .expect(200);
 
-    const token = loginResp.body.access_token;
-    expect(token).toBeDefined();
+    const sessionJwt = loginResp.body.access_token;
+    expect(sessionJwt).toBeDefined();
 
     await request(app.getHttpServer())
       .post('/tours/contextual/publish')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${sessionJwt}`)
+      .send({
+        scenario: ContextualScenario.SIMPLE,
+        drafts: [],
+      })
+      .expect(403);
+
+    const publishPat = await createIntegrationPat(app.getHttpServer(), sessionJwt);
+
+    await request(app.getHttpServer())
+      .post('/tours/contextual/publish')
+      .set('Authorization', `Bearer ${publishPat}`)
       .send({
         scenario: ContextualScenario.SIMPLE,
         drafts: [

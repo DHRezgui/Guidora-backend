@@ -7,9 +7,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { SdkIntegrationToken } from './entities/sdk-integration-token.entity';
 import {
+  ADMIN_ONLY_SDK_SCOPES,
   SDK_TOKEN_PREFIX,
   SDK_TOKEN_SCOPES,
   SdkTokenScope,
@@ -17,6 +18,30 @@ import {
 } from './sdk-token-scopes';
 import type { RequestAuthUser } from './types/request-auth-user.type';
 import { UserRole } from '../user/entities/user.entity';
+import {
+  DEFAULT_SDK_TOKEN_TTL_DAYS,
+  resolveSdkTokenExpiresAt,
+} from './sdk-token-lifecycle.constants';
+import {
+  SdkIntegrationTokenAuditService,
+  type SdkTokenAuditContext,
+} from './sdk-integration-token-audit.service';
+
+/** Durée d'affichage des tokens révoqués dans la liste dashboard (historique récent). */
+export const REVOKED_SDK_TOKEN_LIST_RETENTION_DAYS = 30;
+
+const REVOKED_SDK_TOKEN_LIST_RETENTION_MS =
+  REVOKED_SDK_TOKEN_LIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+export function isSdkTokenVisibleInList(
+  revokedAt: Date | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!revokedAt) {
+    return true;
+  }
+  return nowMs - revokedAt.getTime() <= REVOKED_SDK_TOKEN_LIST_RETENTION_MS;
+}
 
 export interface SdkIntegrationTokenListItem {
   id: string;
@@ -34,21 +59,38 @@ export class SdkIntegrationTokenService {
   constructor(
     @InjectRepository(SdkIntegrationToken)
     private readonly repo: Repository<SdkIntegrationToken>,
+    private readonly auditService: SdkIntegrationTokenAuditService,
   ) {}
 
   listCatalogScopes(): { scopes: readonly SdkTokenScope[]; adminOnly: SdkTokenScope[] } {
     return {
       scopes: SDK_TOKEN_SCOPES,
-      adminOnly: ['tours:publish', 'blueprints:manage'],
+      adminOnly: [...ADMIN_ONLY_SDK_SCOPES],
     };
   }
 
+  async listForCreator(
+    organizationId: string,
+    creatorId: string,
+  ): Promise<SdkIntegrationTokenListItem[]> {
+    const rows = await this.repo.find({
+      where: { organizationId, createdBy: creatorId },
+      order: { createdAt: 'DESC' },
+    });
+    return rows
+      .filter((row) => isSdkTokenVisibleInList(row.revokedAt))
+      .map((row) => this.toListItem(row));
+  }
+
+  /** @deprecated Prefer {@link listForCreator} — tokens are scoped per creator account. */
   async listForOrganization(organizationId: string): Promise<SdkIntegrationTokenListItem[]> {
     const rows = await this.repo.find({
       where: { organizationId },
       order: { createdAt: 'DESC' },
     });
-    return rows.map((row) => this.toListItem(row));
+    return rows
+      .filter((row) => isSdkTokenVisibleInList(row.revokedAt))
+      .map((row) => this.toListItem(row));
   }
 
   async create(
@@ -57,6 +99,8 @@ export class SdkIntegrationTokenService {
     creatorRole: UserRole,
     name: string,
     requestedScopes?: string[],
+    expiresInDays: number = DEFAULT_SDK_TOKEN_TTL_DAYS,
+    auditContext?: SdkTokenAuditContext,
   ): Promise<{ token: string; record: SdkIntegrationTokenListItem }> {
     if (!organizationId) {
       throw new BadRequestException('Organization is required to create an integration token.');
@@ -66,6 +110,7 @@ export class SdkIntegrationTokenService {
     }
 
     const scopes = normalizeRequestedScopes(requestedScopes, creatorRole);
+    const expiresAt = resolveSdkTokenExpiresAt(expiresInDays);
     const secret = randomBytes(32).toString('base64url');
     const plainToken = `${SDK_TOKEN_PREFIX}${secret}`;
     const tokenHash = this.hashToken(plainToken);
@@ -79,8 +124,18 @@ export class SdkIntegrationTokenService {
         tokenHash,
         tokenSuffix,
         scopes,
+        expiresAt,
       }),
     );
+
+    await this.auditService.record({
+      organizationId,
+      eventType: 'created',
+      tokenId: row.id,
+      actorUserId: creatorId,
+      metadata: { name: row.name, scopes, expiresAt: expiresAt.toISOString() },
+      context: auditContext,
+    });
 
     return {
       token: plainToken,
@@ -88,16 +143,61 @@ export class SdkIntegrationTokenService {
     };
   }
 
-  async revoke(id: string, organizationId: string): Promise<void> {
+  async revoke(
+    id: string,
+    organizationId: string,
+    actorUserId: string,
+    auditContext?: SdkTokenAuditContext,
+  ): Promise<void> {
     const row = await this.repo.findOne({ where: { id, organizationId } });
     if (!row) {
       throw new NotFoundException('Integration token not found');
+    }
+    if (row.createdBy !== actorUserId) {
+      throw new ForbiddenException('Vous ne pouvez révoquer que vos propres tokens SDK.');
     }
     if (row.revokedAt) {
       return;
     }
     row.revokedAt = new Date();
     await this.repo.save(row);
+    await this.auditService.record({
+      organizationId,
+      eventType: 'revoked',
+      tokenId: row.id,
+      actorUserId,
+      metadata: { name: row.name, tokenSuffix: row.tokenSuffix },
+      context: auditContext,
+    });
+  }
+
+  async removeRevokedFromHistory(
+    id: string,
+    organizationId: string,
+    actorUserId: string,
+  ): Promise<void> {
+    const row = await this.repo.findOne({ where: { id, organizationId } });
+    if (!row) {
+      throw new NotFoundException('Integration token not found');
+    }
+    if (row.createdBy !== actorUserId) {
+      throw new ForbiddenException('Vous ne pouvez supprimer que vos propres tokens SDK.');
+    }
+    if (!row.revokedAt) {
+      throw new BadRequestException(
+        'Seuls les tokens déjà révoqués peuvent être supprimés de l’historique.',
+      );
+    }
+    await this.repo.remove(row);
+  }
+
+  async purgeRevokedHistory(organizationId: string, actorUserId: string): Promise<number> {
+    const result = await this.repo.delete({
+      organizationId,
+      createdBy: actorUserId,
+      revokedAt: Not(IsNull()),
+    });
+    return result.affected ?? 0;
   }
 
   /**
@@ -118,7 +218,18 @@ export class SdkIntegrationTokenService {
       throw new UnauthorizedException('SDK integration token expired');
     }
 
+    const shouldLogUsage =
+      !row.lastUsedAt || Date.now() - row.lastUsedAt.getTime() > 15 * 60 * 1000;
     void this.repo.update(row.id, { lastUsedAt: new Date() });
+    if (shouldLogUsage) {
+      void this.auditService.record({
+        organizationId: row.organizationId,
+        eventType: 'used',
+        tokenId: row.id,
+        actorUserId: row.createdBy,
+        metadata: { tokenSuffix: row.tokenSuffix },
+      });
+    }
 
     return {
       id: row.createdBy,

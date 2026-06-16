@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, MaxLength, MinLength, ArrayUnique } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ArrayUnique } from 'class-validator';
+import { MAX_SDK_TOKEN_TTL_DAYS, MIN_SDK_TOKEN_TTL_DAYS } from '../sdk-token-lifecycle.constants';
 
 export class CreateSdkIntegrationTokenDto {
   @ApiProperty({ example: 'Application web — production' })
@@ -7,6 +8,16 @@ export class CreateSdkIntegrationTokenDto {
   @MinLength(2)
   @MaxLength(120)
   name: string;
+
+  @ApiPropertyOptional({
+    description: `Token lifetime in days (${MIN_SDK_TOKEN_TTL_DAYS}–${MAX_SDK_TOKEN_TTL_DAYS}). Default: 90.`,
+    example: 90,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(MIN_SDK_TOKEN_TTL_DAYS)
+  @Max(MAX_SDK_TOKEN_TTL_DAYS)
+  expiresInDays?: number;
 
   @ApiPropertyOptional({
     description:

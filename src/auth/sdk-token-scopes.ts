@@ -3,7 +3,6 @@ export const SDK_TOKEN_SCOPES = [
   'tours:runtime',
   'tours:sandbox',
   'blueprints:read',
-  'blueprints:manage',
   'feedback:read',
   'feedback:write',
   'semantic:invoke',
@@ -22,11 +21,8 @@ export const DEFAULT_DEVELOPER_SDK_SCOPES: SdkTokenScope[] = [
   'semantic:invoke',
 ];
 
-/** Extra scopes only assignable when creator is ADMIN. */
-export const ADMIN_ONLY_SDK_SCOPES: SdkTokenScope[] = [
-  'tours:publish',
-  'blueprints:manage',
-];
+/** Extra scopes only assignable when creator is ADMIN (none today — reserved for future). */
+export const ADMIN_ONLY_SDK_SCOPES: SdkTokenScope[] = [];
 
 export const SDK_TOKEN_PREFIX = 'td_sdk_';
 
