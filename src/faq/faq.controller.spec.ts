@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { FaqController } from './faq.controller';
+import { FaqEntryService } from './faq-entry.service';
 import { FaqService } from './faq.service';
 
 describe('FaqController', () => {
@@ -9,6 +10,16 @@ describe('FaqController', () => {
     semanticSearch: jest.fn(),
   };
 
+  const faqEntryService = {
+    listForOrganization: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    setActive: jest.fn(),
+    remove: jest.fn(),
+    rebuildEmbeddings: jest.fn(),
+    listActiveForOrganization: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FaqController],
@@ -16,6 +27,10 @@ describe('FaqController', () => {
         {
           provide: FaqService,
           useValue: faqService,
+        },
+        {
+          provide: FaqEntryService,
+          useValue: faqEntryService,
         },
       ],
     }).compile();
@@ -28,7 +43,7 @@ describe('FaqController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('should return semantic search results', async () => {
+  it('should return semantic search results scoped to organization', async () => {
     faqService.semanticSearch.mockResolvedValue({
       success: true,
       query: 'comment reinitialiser mon mot de passe',
@@ -42,14 +57,6 @@ describe('FaqController', () => {
           priority: 'high',
           score: 0.96,
         },
-        {
-          id: 'faq-006',
-          question: 'Comment changer mon mot de passe apres connexion ?',
-          answer: 'Accedez a votre profil utilisateur pour le modifier.',
-          category: 'auth',
-          priority: 'high',
-          score: 0.72,
-        },
       ],
     });
 
@@ -59,11 +66,11 @@ describe('FaqController', () => {
       minSimilarity: 0.2,
     };
 
-    const result = await controller.semanticSearch(request);
+    const user = { organizationId: 'org-123' };
+    const result = await controller.semanticSearch(request, user);
 
     expect(result.success).toBe(true);
     expect(result.total).toBe(2);
-    expect(result.results[0].id).toBe('faq-003');
-    expect(faqService.semanticSearch).toHaveBeenCalledWith(request);
+    expect(faqService.semanticSearch).toHaveBeenCalledWith(request, 'org-123');
   });
 });

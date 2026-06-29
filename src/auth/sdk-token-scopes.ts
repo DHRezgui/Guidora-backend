@@ -6,6 +6,7 @@ export const SDK_TOKEN_SCOPES = [
   'feedback:read',
   'feedback:write',
   'semantic:invoke',
+  'faq:search',
   'tours:publish',
 ] as const;
 
@@ -19,6 +20,7 @@ export const DEFAULT_DEVELOPER_SDK_SCOPES: SdkTokenScope[] = [
   'feedback:read',
   'feedback:write',
   'semantic:invoke',
+  'faq:search',
 ];
 
 /** Extra scopes only assignable when creator is ADMIN (none today — reserved for future). */

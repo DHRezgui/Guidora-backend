@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SemanticSearchRequestDto, SemanticSearchResponseDto } from './dto/semantic-search.dto';
+import { FaqEntryService } from './faq-entry.service';
 
 @Injectable()
 export class FaqService {
@@ -13,7 +14,7 @@ export class FaqService {
 	private readonly pythonTimeoutMs: number;
 	private readonly adaptiveThresholds: number[];
 
-	constructor() {
+	constructor(private readonly faqEntryService: FaqEntryService) {
 		const cwd = process.cwd();
 		this.workspaceRoot = path.basename(cwd).toLowerCase() === 'backend' ? path.resolve(cwd, '..') : cwd;
 		this.pythonTimeoutMs = Number(process.env.FAQ_PYTHON_TIMEOUT_MS ?? 600000);
@@ -24,7 +25,10 @@ export class FaqService {
 		this.semanticScriptPath = this.resolveSemanticScriptPath();
 	}
 
-	async semanticSearch(request: SemanticSearchRequestDto): Promise<SemanticSearchResponseDto> {
+	async semanticSearch(
+		request: SemanticSearchRequestDto,
+		organizationId?: string,
+	): Promise<SemanticSearchResponseDto> {
 		const topK = request.topK ?? 5;
 		const requestedMinSimilarity = request.minSimilarity;
 
@@ -34,10 +38,15 @@ export class FaqService {
 			);
 		}
 
+		const orgEmbeddingsPath = organizationId
+			? await this.faqEntryService.ensureEmbeddingsForOrganization(organizationId)
+			: null;
+
 		const rawResponse = await this.executeSemanticSearch(
 			request.question,
 			Math.max(1, topK),
 			-1,
+			orgEmbeddingsPath,
 		);
 
 		if (!rawResponse.results?.length) {
@@ -166,21 +175,27 @@ export class FaqService {
 		query: string,
 		topK: number,
 		minSimilarity: number,
+		embeddingsPath?: string | null,
 	): Promise<SemanticSearchResponseDto> {
 		const scriptCwd = path.join(this.workspaceRoot, 'ml');
+		const args = [
+			this.semanticScriptPath,
+			query,
+			'--top-k',
+			topK.toString(),
+			'--min-similarity',
+			minSimilarity.toString(),
+			'--json',
+		];
+
+		if (embeddingsPath) {
+			args.push('--embeddings', embeddingsPath);
+		}
 
 		return new Promise((resolve, reject) => {
 			const child = spawn(
 				this.pythonExecutable,
-				[
-					this.semanticScriptPath,
-					query,
-					'--top-k',
-					topK.toString(),
-					'--min-similarity',
-					minSimilarity.toString(),
-					'--json',
-				],
+				args,
 				{
 					cwd: scriptCwd,
 					env: {

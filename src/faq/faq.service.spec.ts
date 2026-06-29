@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { FaqService } from './faq.service';
+import { FaqEntryService } from './faq-entry.service';
 
 jest.mock('child_process', () => ({
   spawn: jest.fn(),
@@ -9,10 +10,13 @@ import { spawn } from 'child_process';
 
 describe('FaqService', () => {
   let service: FaqService;
+  const faqEntryService = {
+    ensureEmbeddingsForOrganization: jest.fn().mockResolvedValue(null),
+  } as unknown as FaqEntryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new FaqService();
+    service = new FaqService(faqEntryService);
   });
 
   it('should return parsed semantic search response', async () => {

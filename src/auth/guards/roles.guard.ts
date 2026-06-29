@@ -26,7 +26,7 @@ export class RolesGuard implements CanActivate {
       return false;
     }
 
-    if (authUser.authMethod === 'sdk_token') {
+    if (authUser.authMethod === 'sdk_token' || authUser.authMethod === 'sdk_session') {
       const allowSdk = this.reflector.getAllAndOverride<SdkTokenScope[] | undefined>(
         ALLOW_SDK_SCOPES_KEY,
         [context.getHandler(), context.getClass()],

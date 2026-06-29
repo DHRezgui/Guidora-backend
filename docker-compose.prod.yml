@@ -6,6 +6,7 @@ services:
     env_file: .docker/prod/.env
     volumes:
       - ../ml:/app/ml:ro
+      - ./data/faq-orgs:/app/data/faq-orgs
     ports:
       - '3002:3000'
     networks:

@@ -20,6 +20,7 @@ import { RabbitmqModule } from './rabbitmq/rabbitmq.module';
 import { BehaviorAnalysisModule } from './behavior-analysis/behavior-analysis.module';
 import { MailModule } from './mail/mail.module';
 import { FaqModule } from './faq/faq.module';
+import { FaqItem } from './faq/entities/faq-item.entity';
 import { User } from './user/entities/user.entity';
 import { Organization } from './organization/entities/organization.entity';
 import { GuidedTour } from './guided-tour/entities/guided-tour.entity';
@@ -72,6 +73,7 @@ import { MlModule } from './ml/ml.module';
         SdkIntegrationToken,
         SdkIntegrationTokenAudit,
         SdkSessionToken,
+        FaqItem,
       ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',
