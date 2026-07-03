@@ -30,6 +30,16 @@ export class CreateFaqEntryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'test-11-v1',
+    description: 'Host app / flow identifier. Aligns with SDK contextualSuggestions.flowVersion.',
+    default: 'default',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  projectKey?: string;
 }
 
 export class UpdateFaqEntryDto extends PartialType(CreateFaqEntryDto) {}
@@ -46,6 +56,9 @@ export class FaqEntryResponseDto {
 
   @ApiProperty()
   organizationId: string;
+
+  @ApiProperty({ example: 'test-11-v1' })
+  projectKey: string;
 
   @ApiProperty()
   question: string;
@@ -87,6 +100,21 @@ export class FaqManageListResponseDto {
 
   @ApiProperty({ type: [FaqEntryResponseDto] })
   items: FaqEntryResponseDto[];
+
+  @ApiPropertyOptional({ type: [String], example: ['default', 'test-11-v1'] })
+  projectKeys?: string[];
+
+  @ApiPropertyOptional({
+    example: { default: 50, 'test-11-v1': 1 },
+    description: 'Entry count per FAQ pack for dashboard tabs',
+  })
+  projectKeyCounts?: Record<string, number>;
+
+  @ApiPropertyOptional({
+    example: { 'test-11-v1': 3 },
+    description: 'Contextual tour count per flowVersion (aligned with FAQ project keys)',
+  })
+  projectKeyTourCounts?: Record<string, number>;
 }
 
 export class FaqReindexResponseDto {
@@ -119,6 +147,46 @@ export class ImportGlobalFaqDto {
   @IsOptional()
   @IsBoolean()
   replaceExisting?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'test-11-v1',
+    description: 'Target FAQ pack / project key for imported entries',
+    default: 'default',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  projectKey?: string;
+}
+
+export class RegisterFaqProjectDto {
+  @ApiProperty({ example: 'test-11-v1' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  projectKey: string;
+}
+
+export class RegisterFaqProjectResponseDto {
+  @ApiProperty()
+  success: boolean;
+
+  @ApiProperty()
+  projectKey: string;
+
+  @ApiProperty({ description: 'True when a new registry row was created' })
+  created: boolean;
+}
+
+export class DeleteFaqProjectResponseDto {
+  @ApiProperty()
+  success: boolean;
+
+  @ApiProperty()
+  message: string;
+
+  @ApiProperty()
+  deleted: number;
 }
 
 export class FaqImportGlobalResponseDto {

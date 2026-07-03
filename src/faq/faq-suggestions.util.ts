@@ -95,19 +95,16 @@ export function rankFaqSuggestions(
 
   const tokens = tokenizeContext(context?.trim() ?? '');
   const ranked = [...items]
-    .map((item) => {
-      const matchScore = contextMatchScore(item, tokens);
-      const priorityScore = extractPriorityFromTags(item.tags);
-      const popularity = popularityScore(item);
-      return {
-        item,
-        score: matchScore * 10 + priorityScore * 4 + Math.min(popularity, 20) * 0.1,
-        matchScore,
-      };
-    })
+    .map((item) => ({
+      item,
+      matchScore: contextMatchScore(item, tokens),
+      priorityScore: extractPriorityFromTags(item.tags),
+      popularity: popularityScore(item),
+    }))
     .sort((left, right) => {
       if (right.matchScore !== left.matchScore) return right.matchScore - left.matchScore;
-      if (right.score !== left.score) return right.score - left.score;
+      if (right.priorityScore !== left.priorityScore) return right.priorityScore - left.priorityScore;
+      if (right.popularity !== left.popularity) return right.popularity - left.popularity;
       return left.item.question.localeCompare(right.item.question, 'fr');
     });
 

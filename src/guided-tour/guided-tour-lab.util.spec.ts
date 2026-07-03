@@ -8,6 +8,7 @@ import {
   isDeveloperOnlyAutogenTour,
   isSdkLabPublishScopedByCreator,
   isSdkLabPublishedTour,
+  isSdkLabProjectKey,
   isSdkLabTargetPath,
   isSdkLabTemplateTour,
   isLikelyManualContextualTourDerivative,
@@ -233,6 +234,18 @@ describe('isSdkLabTargetPath', () => {
 
   it('rejects production paths', () => {
     expect(isSdkLabTargetPath('/dashboard/users')).toBe(false);
+  });
+});
+
+describe('isSdkLabProjectKey', () => {
+  it('detects lab flowVersion keys', () => {
+    expect(isSdkLabProjectKey('simple-lab-v1')).toBe(true);
+    expect(isSdkLabProjectKey('integration-health-v1')).toBe(true);
+  });
+
+  it('keeps real SDK project keys', () => {
+    expect(isSdkLabProjectKey('test-11-v1')).toBe(false);
+    expect(isSdkLabProjectKey('crm-v2')).toBe(false);
   });
 });
 

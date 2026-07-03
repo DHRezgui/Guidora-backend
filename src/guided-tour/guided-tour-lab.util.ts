@@ -7,6 +7,21 @@ export type TourLabEligibility = Pick<GuidedTour, 'targetUrl' | 'triggerConditio
 
 export const SDK_LAB_TARGET_PATH_SEGMENT = '/dashboard/sdk-tests/';
 
+const SDK_LAB_FLOW_VERSION_RE = /-lab-v\d+$/i;
+const SDK_LAB_INTEGRATION_FLOW_VERSION_RE = /^integration-health-v\d+$/i;
+
+/**
+ * Clé flowVersion / projectKey réservée au lab SDK dashboard.
+ * Ces clés ne participent pas au hub Projets (FAQ / blueprints métier).
+ */
+export function isSdkLabProjectKey(projectKey?: string): boolean {
+  const key = projectKey?.trim();
+  if (!key) {
+    return false;
+  }
+  return SDK_LAB_FLOW_VERSION_RE.test(key) || SDK_LAB_INTEGRATION_FLOW_VERSION_RE.test(key);
+}
+
 /** Champs interdits aux développeurs sur un parcours lab (whitelist stricte). */
 export const DEVELOPER_LAB_FORBIDDEN_UPDATE_FIELDS = [
   'targetUrl',

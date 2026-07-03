@@ -53,6 +53,29 @@ describe('rankFaqSuggestions', () => {
     expect(ranked[0]?.id).toBe('faq-high');
   });
 
+  it('uses popularity as tie-breaker when contextual match is equal', () => {
+    const ranked = rankFaqSuggestions(
+      [
+        item({
+          id: 'faq-alpha',
+          question: 'Comment creer un nouveau projet ?',
+          tags: ['project'],
+        }),
+        item({
+          id: 'faq-popular',
+          question: 'Comment modifier un projet existant ?',
+          tags: ['project'],
+          viewCount: 4,
+          helpfulCount: 4,
+        }),
+      ],
+      'project dashboard',
+      2,
+    );
+
+    expect(ranked[0]?.id).toBe('faq-popular');
+  });
+
   it('does not collapse to a single false-positive command/commande match', () => {
     const ranked = rankFaqSuggestions(
       [

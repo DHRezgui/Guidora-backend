@@ -28,6 +28,15 @@ import {
   isFaqEditLockHeldBy,
 } from './faq-edit-lock.util';
 import { FaqItem } from './entities/faq-item.entity';
+import { FaqProject } from './entities/faq-project.entity';
+import { GuidedTour } from '../guided-tour/entities/guided-tour.entity';
+import { isSdkLabProjectKey, SDK_LAB_TARGET_PATH_SEGMENT } from '../guided-tour/guided-tour-lab.util';
+import { tourFlowVersionSqlExpr } from '../guided-tour/tour-project-scope.util';
+import {
+  DEFAULT_FAQ_PROJECT_KEY,
+  faqProjectStorageSegment,
+  normalizeFaqProjectKey,
+} from './faq-project-key.util';
 
 interface GlobalFaqCatalogItem {
   id?: string | number;
@@ -40,6 +49,7 @@ interface GlobalFaqCatalogItem {
 export interface ImportGlobalFaqOptions {
   skipDuplicates?: boolean;
   replaceExisting?: boolean;
+  projectKey?: string;
 }
 
 export interface ImportGlobalFaqResult {
@@ -62,8 +72,12 @@ export class FaqEntryService {
   constructor(
     @InjectRepository(FaqItem)
     private readonly faqRepository: Repository<FaqItem>,
+    @InjectRepository(FaqProject)
+    private readonly faqProjectRepository: Repository<FaqProject>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(GuidedTour)
+    private readonly guidedTourRepository: Repository<GuidedTour>,
   ) {
     this.appRoot = process.cwd();
     this.mlRoot = this.resolveMlRoot();
@@ -73,18 +87,161 @@ export class FaqEntryService {
     fs.mkdirSync(this.orgStorageRoot, { recursive: true });
   }
 
-  async listForOrganization(organizationId: string, actorId?: string): Promise<FaqItem[]> {
+  async listForOrganization(
+    organizationId: string,
+    actorId?: string,
+    projectKey?: string,
+  ): Promise<FaqItem[]> {
+    const normalizedKey = projectKey ? normalizeFaqProjectKey(projectKey) : undefined;
     const items = await this.faqRepository.find({
-      where: { organizationId },
-      order: { updatedAt: 'DESC' },
+      where: normalizedKey
+        ? { organizationId, projectKey: normalizedKey }
+        : { organizationId },
+      order: { projectKey: 'ASC', updatedAt: 'DESC' },
     });
     await this.attachEditLocks(items, actorId);
     return items;
   }
 
-  async listActiveForOrganization(organizationId: string): Promise<FaqItem[]> {
+  async listProjectKeysForOrganization(organizationId: string): Promise<string[]> {
+    const [itemKeys, registeredRows] = await Promise.all([
+      this.faqRepository
+        .createQueryBuilder('item')
+        .select('DISTINCT item.projectKey', 'projectKey')
+        .where('item.organizationId = :organizationId', { organizationId })
+        .orderBy('item.projectKey', 'ASC')
+        .getRawMany<{ projectKey: string }>(),
+      this.faqProjectRepository.find({
+        where: { organizationId },
+        order: { projectKey: 'ASC' },
+      }),
+    ]);
+
+    const keys = [
+      ...new Set([
+        ...itemKeys.map((row) => row.projectKey).filter(Boolean),
+        ...registeredRows.map((row) => row.projectKey).filter(Boolean),
+      ]),
+    ]
+      .filter((key) => !isSdkLabProjectKey(key))
+      .sort();
+
+    return keys.length > 0 ? keys : [DEFAULT_FAQ_PROJECT_KEY];
+  }
+
+  async listProjectKeyCounts(organizationId: string): Promise<Record<string, number>> {
+    const rows = await this.faqRepository
+      .createQueryBuilder('item')
+      .select('item.projectKey', 'projectKey')
+      .addSelect('COUNT(*)', 'count')
+      .where('item.organizationId = :organizationId', { organizationId })
+      .groupBy('item.projectKey')
+      .orderBy('item.projectKey', 'ASC')
+      .getRawMany<{ projectKey: string; count: string }>();
+
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      if (!row.projectKey) continue;
+      counts[row.projectKey] = Number(row.count) || 0;
+    }
+
+    const projectKeys = await this.listProjectKeysForOrganization(organizationId);
+    for (const key of projectKeys) {
+      if (counts[key] === undefined) {
+        counts[key] = 0;
+      }
+    }
+
+    return counts;
+  }
+
+  async listProjectKeyTourCounts(organizationId: string): Promise<Record<string, number>> {
+    const flowVersionExpr = tourFlowVersionSqlExpr('tour');
+    const labPath = `%${SDK_LAB_TARGET_PATH_SEGMENT}%`;
+
+    const rows = await this.guidedTourRepository
+      .createQueryBuilder('tour')
+      .select(flowVersionExpr, 'flowVersion')
+      .addSelect('COUNT(*)', 'count')
+      .where('tour.organizationId = :organizationId', { organizationId })
+      .andWhere(`${flowVersionExpr} IS NOT NULL`)
+      .andWhere(`${flowVersionExpr} != ''`)
+      .andWhere('LOWER(tour.targetUrl) NOT LIKE :sdkLabPath', { sdkLabPath: labPath })
+      .groupBy(flowVersionExpr)
+      .orderBy(flowVersionExpr, 'ASC')
+      .getRawMany<{ flowVersion: string; count: string }>();
+
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      if (!row.flowVersion || isSdkLabProjectKey(row.flowVersion)) continue;
+      counts[normalizeFaqProjectKey(row.flowVersion)] = Number(row.count) || 0;
+    }
+
+    const unscopedRow = await this.guidedTourRepository
+      .createQueryBuilder('tour')
+      .select('COUNT(*)', 'count')
+      .where('tour.organizationId = :organizationId', { organizationId })
+      .andWhere(`(${flowVersionExpr} IS NULL OR ${flowVersionExpr} = '')`)
+      .andWhere('LOWER(tour.targetUrl) NOT LIKE :sdkLabPath', { sdkLabPath: labPath })
+      .getRawOne<{ count: string }>();
+
+    const unscopedCount = Number(unscopedRow?.count) || 0;
+    if (unscopedCount > 0) {
+      counts[DEFAULT_FAQ_PROJECT_KEY] = (counts[DEFAULT_FAQ_PROJECT_KEY] ?? 0) + unscopedCount;
+    }
+
+    return counts;
+  }
+
+  async registerProject(
+    organizationId: string,
+    projectKey: string,
+  ): Promise<{ projectKey: string; created: boolean }> {
+    const normalized = normalizeFaqProjectKey(projectKey);
+    if (normalized === DEFAULT_FAQ_PROJECT_KEY) {
+      return { projectKey: normalized, created: false };
+    }
+
+    const existing = await this.faqProjectRepository.findOne({
+      where: { organizationId, projectKey: normalized },
+    });
+    if (existing) {
+      return { projectKey: normalized, created: false };
+    }
+
+    await this.faqProjectRepository.save({
+      organizationId,
+      projectKey: normalized,
+    });
+    return { projectKey: normalized, created: true };
+  }
+
+  async deleteProjectPack(organizationId: string, projectKey: string): Promise<number> {
+    const normalized = normalizeFaqProjectKey(projectKey);
+    if (normalized === DEFAULT_FAQ_PROJECT_KEY) {
+      throw new BadRequestException('Le corpus FAQ générique ne peut pas être supprimé');
+    }
+
+    const deleted = await this.removeAllForOrganization(organizationId, normalized);
+    await this.faqProjectRepository.delete({ organizationId, projectKey: normalized });
+    return deleted;
+  }
+
+  private async ensureProjectRegistered(organizationId: string, projectKey: string): Promise<void> {
+    const normalized = normalizeFaqProjectKey(projectKey);
+    if (normalized === DEFAULT_FAQ_PROJECT_KEY) {
+      return;
+    }
+    await this.registerProject(organizationId, normalized);
+  }
+
+  async listActiveForOrganization(
+    organizationId: string,
+    projectKey?: string,
+  ): Promise<FaqItem[]> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
     return this.faqRepository.find({
-      where: { organizationId, isActive: true },
+      where: { organizationId, isActive: true, projectKey: normalizedKey },
       order: { updatedAt: 'DESC' },
     });
   }
@@ -93,8 +250,9 @@ export class FaqEntryService {
     organizationId: string,
     context?: string,
     limit = 4,
+    projectKey?: string,
   ): Promise<Array<{ id: string; question: string }>> {
-    const activeItems = await this.listActiveForOrganization(organizationId);
+    const activeItems = await this.listActiveForOrganization(organizationId, projectKey);
     const ranked = rankFaqSuggestions(
       activeItems.map((item) => ({
         id: item.id,
@@ -115,27 +273,34 @@ export class FaqEntryService {
     }));
   }
 
-  async getIndexStatus(organizationId: string): Promise<{
+  async getIndexStatus(
+    organizationId: string,
+    projectKey?: string,
+  ): Promise<{
     activeCount: number;
     embeddingsReady: boolean;
     needsReindex: boolean;
     lastIndexedAt: string | null;
+    projectKey: string;
   }> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
     const activeCount = await this.faqRepository.count({
-      where: { organizationId, isActive: true },
+      where: { organizationId, isActive: true, projectKey: normalizedKey },
     });
-    const embeddingsPath = this.getOrgEmbeddingsPath(organizationId);
-    const embeddingsReady = fs.existsSync(embeddingsPath);
-    const lastIndexedAt = embeddingsReady
-      ? new Date(fs.statSync(embeddingsPath).mtimeMs).toISOString()
-      : null;
-    const needsReindex = await this.needsEmbeddingsRebuild(organizationId);
+    const embeddingsPath = this.resolveEmbeddingsPathForSearch(organizationId, normalizedKey);
+    const embeddingsReady = Boolean(embeddingsPath);
+    const lastIndexedAt =
+      embeddingsPath && fs.existsSync(embeddingsPath)
+        ? new Date(fs.statSync(embeddingsPath).mtimeMs).toISOString()
+        : null;
+    const needsReindex = await this.needsEmbeddingsRebuild(organizationId, normalizedKey);
 
     return {
       activeCount,
       embeddingsReady,
       needsReindex,
       lastIndexedAt,
+      projectKey: normalizedKey,
     };
   }
 
@@ -164,16 +329,20 @@ export class FaqEntryService {
   }
 
   async create(organizationId: string, dto: CreateFaqEntryDto): Promise<FaqItem> {
+    const projectKey = normalizeFaqProjectKey(dto.projectKey);
+    await this.ensureProjectRegistered(organizationId, projectKey);
     const row = this.faqRepository.create({
       organizationId,
+      projectKey,
       question: dto.question.trim(),
       answer: dto.answer.trim(),
       category: dto.category?.trim() || null,
       tags: dto.tags ?? [],
       isActive: dto.isActive ?? true,
+      contentUpdatedAt: new Date(),
     });
     const saved = await this.faqRepository.save(row);
-    this.scheduleEmbeddingsRebuild(organizationId);
+    this.scheduleEmbeddingsRebuild(organizationId, projectKey);
     return saved;
   }
 
@@ -186,19 +355,25 @@ export class FaqEntryService {
     const row = await this.getById(id, organizationId, actorId);
     const holderDisplayName = await this.resolveEditLockHolderDisplayName(row);
     assertFaqEditLockHeldForSave(row, actorId, holderDisplayName);
+    const previousProjectKey = row.projectKey;
 
     if (dto.question !== undefined) row.question = dto.question.trim();
     if (dto.answer !== undefined) row.answer = dto.answer.trim();
     if (dto.category !== undefined) row.category = dto.category?.trim() || null;
     if (dto.tags !== undefined) row.tags = dto.tags;
     if (dto.isActive !== undefined) row.isActive = dto.isActive;
+    if (dto.projectKey !== undefined) row.projectKey = normalizeFaqProjectKey(dto.projectKey);
 
     if (isFaqEditLockHeldBy(row, actorId)) {
       row.editLockExpiresAt = new Date(Date.now() + FAQ_EDIT_LOCK_TTL_MS);
     }
 
+    this.markFaqContentUpdated(row);
     const saved = await this.faqRepository.save(row);
-    this.scheduleEmbeddingsRebuild(organizationId);
+    this.scheduleEmbeddingsRebuild(organizationId, saved.projectKey);
+    if (saved.projectKey !== previousProjectKey) {
+      this.scheduleEmbeddingsRebuild(organizationId, previousProjectKey);
+    }
     await this.attachEditLock(saved, actorId);
     return saved;
   }
@@ -227,8 +402,9 @@ export class FaqEntryService {
       }
 
       row.isActive = isActive;
+      this.markFaqContentUpdated(row);
       const saved = await manager.save(row);
-      this.scheduleEmbeddingsRebuild(organizationId);
+      this.scheduleEmbeddingsRebuild(organizationId, saved.projectKey);
       await this.attachEditLock(saved, actorId);
       return saved;
     });
@@ -238,18 +414,28 @@ export class FaqEntryService {
     const row = await this.getById(id, organizationId, actorId);
     const holderDisplayName = await this.resolveEditLockHolderDisplayName(row);
     assertFaqDeleteBlockedWhileEditing(row, actorId, holderDisplayName);
+    const projectKey = row.projectKey;
     await this.faqRepository.remove(row);
-    this.scheduleEmbeddingsRebuild(organizationId);
+    this.scheduleEmbeddingsRebuild(organizationId, projectKey);
   }
 
-  async removeAllForOrganization(organizationId: string): Promise<number> {
-    const deleted = await this.faqRepository.count({ where: { organizationId } });
+  async removeAllForOrganization(organizationId: string, projectKey?: string): Promise<number> {
+    const normalizedKey = projectKey ? normalizeFaqProjectKey(projectKey) : undefined;
+    const where = normalizedKey ? { organizationId, projectKey: normalizedKey } : { organizationId };
+    const deleted = await this.faqRepository.count({ where });
     if (deleted === 0) {
       return 0;
     }
 
-    await this.faqRepository.delete({ organizationId });
-    this.scheduleEmbeddingsRebuild(organizationId);
+    await this.faqRepository.delete(where);
+    if (normalizedKey) {
+      this.scheduleEmbeddingsRebuild(organizationId, normalizedKey);
+    } else {
+      const keys = await this.listProjectKeysForOrganization(organizationId);
+      for (const key of keys) {
+        this.scheduleEmbeddingsRebuild(organizationId, key);
+      }
+    }
     return deleted;
   }
 
@@ -396,15 +582,16 @@ export class FaqEntryService {
   ): Promise<ImportGlobalFaqResult> {
     const skipDuplicates = options.skipDuplicates ?? true;
     const replaceExisting = options.replaceExisting ?? false;
+    const projectKey = normalizeFaqProjectKey(options.projectKey);
     const catalog = this.loadGlobalCatalog();
 
     if (replaceExisting) {
-      await this.faqRepository.delete({ organizationId });
+      await this.faqRepository.delete({ organizationId, projectKey });
     }
 
     const existingQuestions = new Set<string>();
     if (skipDuplicates && !replaceExisting) {
-      const existing = await this.listForOrganization(organizationId);
+      const existing = await this.listForOrganization(organizationId, undefined, projectKey);
       for (const row of existing) {
         existingQuestions.add(this.normalizeQuestion(row.question));
       }
@@ -430,11 +617,13 @@ export class FaqEntryService {
       toSave.push(
         this.faqRepository.create({
           organizationId,
+          projectKey,
           question,
           answer: typeof item.answer === 'string' && item.answer.trim() ? item.answer.trim() : '—',
           category: typeof item.category === 'string' && item.category.trim() ? item.category.trim() : null,
           tags: this.buildGlobalImportTags(item),
           isActive: true,
+          contentUpdatedAt: new Date(),
         }),
       );
     }
@@ -443,7 +632,7 @@ export class FaqEntryService {
       await this.faqRepository.save(toSave);
     }
 
-    this.scheduleEmbeddingsRebuild(organizationId);
+    this.scheduleEmbeddingsRebuild(organizationId, projectKey);
 
     return {
       imported: toSave.length,
@@ -452,26 +641,53 @@ export class FaqEntryService {
     };
   }
 
-  getOrgQuestionsPath(organizationId: string): string {
-    return path.join(this.orgStorageRoot, organizationId, 'faq_questions.json');
+  getOrgQuestionsPath(organizationId: string, projectKey = DEFAULT_FAQ_PROJECT_KEY): string {
+    const segment = faqProjectStorageSegment(projectKey);
+    return path.join(this.orgStorageRoot, organizationId, segment, 'faq_questions.json');
   }
 
-  getOrgEmbeddingsPath(organizationId: string): string {
+  getOrgEmbeddingsPath(organizationId: string, projectKey = DEFAULT_FAQ_PROJECT_KEY): string {
+    const segment = faqProjectStorageSegment(projectKey);
+    return path.join(this.orgStorageRoot, organizationId, segment, 'faq_embeddings.json');
+  }
+
+  getLegacyOrgEmbeddingsPath(organizationId: string): string {
     return path.join(this.orgStorageRoot, organizationId, 'faq_embeddings.json');
   }
 
-  resolveEmbeddingsPathForSearch(organizationId?: string): string | null {
+  resolveEmbeddingsPathForSearch(organizationId?: string, projectKey?: string): string | null {
     if (!organizationId) {
       return null;
     }
-    const orgPath = this.getOrgEmbeddingsPath(organizationId);
-    return fs.existsSync(orgPath) ? orgPath : null;
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
+    const projectPath = this.getOrgEmbeddingsPath(organizationId, normalizedKey);
+    if (fs.existsSync(projectPath)) {
+      return projectPath;
+    }
+    if (normalizedKey === DEFAULT_FAQ_PROJECT_KEY) {
+      const legacyPath = this.getLegacyOrgEmbeddingsPath(organizationId);
+      if (fs.existsSync(legacyPath)) {
+        return legacyPath;
+      }
+    }
+    return null;
   }
 
-  async needsEmbeddingsRebuild(organizationId: string): Promise<boolean> {
-    const embeddingsPath = this.getOrgEmbeddingsPath(organizationId);
+  private rebuildScopeKey(organizationId: string, projectKey: string): string {
+    return `${organizationId}:${normalizeFaqProjectKey(projectKey)}`;
+  }
+
+  private markFaqContentUpdated(row: FaqItem): void {
+    row.contentUpdatedAt = new Date();
+  }
+
+  async needsEmbeddingsRebuild(organizationId: string, projectKey?: string): Promise<boolean> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
+    const embeddingsPath =
+      this.resolveEmbeddingsPathForSearch(organizationId, normalizedKey) ??
+      this.getOrgEmbeddingsPath(organizationId, normalizedKey);
     const activeCount = await this.faqRepository.count({
-      where: { organizationId, isActive: true },
+      where: { organizationId, isActive: true, projectKey: normalizedKey },
     });
 
     if (activeCount === 0) {
@@ -484,78 +700,91 @@ export class FaqEntryService {
 
     const row = await this.faqRepository
       .createQueryBuilder('item')
-      .select('MAX(item.updatedAt)', 'maxUpdatedAt')
+      .select('MAX(item.contentUpdatedAt)', 'maxContentUpdatedAt')
       .where('item.organizationId = :organizationId', { organizationId })
+      .andWhere('item.projectKey = :projectKey', { projectKey: normalizedKey })
       .andWhere('item.isActive = :isActive', { isActive: true })
-      .getRawOne<{ maxUpdatedAt: Date | string | null }>();
+      .getRawOne<{ maxContentUpdatedAt: Date | string | null }>();
 
-    if (!row?.maxUpdatedAt) {
+    if (!row?.maxContentUpdatedAt) {
       return true;
     }
 
-    const latestChangeMs = new Date(row.maxUpdatedAt).getTime();
+    const latestChangeMs = new Date(row.maxContentUpdatedAt).getTime();
     const indexMtimeMs = fs.statSync(embeddingsPath).mtimeMs;
     return latestChangeMs > indexMtimeMs;
   }
 
-  async ensureEmbeddingsForOrganization(organizationId: string): Promise<string | null> {
+  async ensureEmbeddingsForOrganization(
+    organizationId: string,
+    projectKey?: string,
+  ): Promise<string | null> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
     const activeCount = await this.faqRepository.count({
-      where: { organizationId, isActive: true },
+      where: { organizationId, isActive: true, projectKey: normalizedKey },
     });
     if (activeCount === 0) {
       return null;
     }
 
-    if (!(await this.needsEmbeddingsRebuild(organizationId))) {
-      return this.getOrgEmbeddingsPath(organizationId);
+    if (!(await this.needsEmbeddingsRebuild(organizationId, normalizedKey))) {
+      return this.resolveEmbeddingsPathForSearch(organizationId, normalizedKey);
     }
 
     try {
-      return await this.rebuildEmbeddings(organizationId);
+      return await this.rebuildEmbeddings(organizationId, normalizedKey);
     } catch (error) {
       this.logger.warn(
-        `Unable to build org FAQ embeddings for ${organizationId}: ${(error as Error).message}`,
+        `Unable to build org FAQ embeddings for ${organizationId}/${normalizedKey}: ${(error as Error).message}`,
       );
-      return this.resolveEmbeddingsPathForSearch(organizationId);
+      return this.resolveEmbeddingsPathForSearch(organizationId, normalizedKey);
     }
   }
 
-  async rebuildEmbeddings(organizationId: string): Promise<string> {
-    const inFlight = this.rebuildLocks.get(organizationId);
+  async rebuildEmbeddings(
+    organizationId: string,
+    projectKey = DEFAULT_FAQ_PROJECT_KEY,
+  ): Promise<string> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
+    const scopeKey = this.rebuildScopeKey(organizationId, normalizedKey);
+    const inFlight = this.rebuildLocks.get(scopeKey);
     if (inFlight) {
-      this.reindexPending.add(organizationId);
+      this.reindexPending.add(scopeKey);
       return inFlight;
     }
 
-    const job = this.executeRebuildEmbeddings(organizationId).finally(() => {
-      this.rebuildLocks.delete(organizationId);
-      if (!this.reindexPending.has(organizationId)) {
+    const job = this.executeRebuildEmbeddings(organizationId, normalizedKey).finally(() => {
+      this.rebuildLocks.delete(scopeKey);
+      if (!this.reindexPending.has(scopeKey)) {
         return;
       }
-      this.reindexPending.delete(organizationId);
-      void this.needsEmbeddingsRebuild(organizationId)
+      this.reindexPending.delete(scopeKey);
+      void this.needsEmbeddingsRebuild(organizationId, normalizedKey)
         .then((stillStale) => {
           if (!stillStale) {
             return undefined;
           }
-          return this.rebuildEmbeddings(organizationId);
+          return this.rebuildEmbeddings(organizationId, normalizedKey);
         })
         .catch((error) => {
           this.logger.warn(
-            `Follow-up FAQ reindex failed for ${organizationId}: ${(error as Error).message}`,
+            `Follow-up FAQ reindex failed for ${organizationId}/${normalizedKey}: ${(error as Error).message}`,
           );
         });
     });
 
-    this.rebuildLocks.set(organizationId, job);
+    this.rebuildLocks.set(scopeKey, job);
     return job;
   }
 
-  private async executeRebuildEmbeddings(organizationId: string): Promise<string> {
-    const activeItems = await this.listActiveForOrganization(organizationId);
-    this.ensureOrgStorageDir(organizationId);
-    const questionsPath = this.getOrgQuestionsPath(organizationId);
-    const embeddingsPath = this.getOrgEmbeddingsPath(organizationId);
+  private async executeRebuildEmbeddings(
+    organizationId: string,
+    projectKey: string,
+  ): Promise<string> {
+    const activeItems = await this.listActiveForOrganization(organizationId, projectKey);
+    this.ensureOrgProjectStorageDir(organizationId, projectKey);
+    const questionsPath = this.getOrgQuestionsPath(organizationId, projectKey);
+    const embeddingsPath = this.getOrgEmbeddingsPath(organizationId, projectKey);
 
     const payload = activeItems.map((item) => ({
       id: item.id,
@@ -590,10 +819,11 @@ export class FaqEntryService {
     return embeddingsPath;
   }
 
-  scheduleEmbeddingsRebuild(organizationId: string): void {
-    void this.rebuildEmbeddings(organizationId).catch((error) => {
+  scheduleEmbeddingsRebuild(organizationId: string, projectKey = DEFAULT_FAQ_PROJECT_KEY): void {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
+    void this.rebuildEmbeddings(organizationId, normalizedKey).catch((error) => {
       this.logger.warn(
-        `Background FAQ reindex failed for ${organizationId}: ${(error as Error).message}`,
+        `Background FAQ reindex failed for ${organizationId}/${normalizedKey}: ${(error as Error).message}`,
       );
     });
   }
@@ -624,6 +854,11 @@ export class FaqEntryService {
       return path.resolve(envRoot);
     }
     return path.join(this.appRoot, 'data', 'faq-orgs');
+  }
+
+  private ensureOrgProjectStorageDir(organizationId: string, projectKey: string): void {
+    const segment = faqProjectStorageSegment(projectKey);
+    fs.mkdirSync(path.join(this.orgStorageRoot, organizationId, segment), { recursive: true });
   }
 
   private ensureOrgStorageDir(organizationId: string): void {

@@ -38,9 +38,22 @@ export class FaqService {
 			);
 		}
 
-		const orgEmbeddingsPath = organizationId
-			? await this.faqEntryService.ensureEmbeddingsForOrganization(organizationId)
-			: null;
+		let orgEmbeddingsPath: string | null = null;
+		if (organizationId) {
+			orgEmbeddingsPath = await this.faqEntryService.ensureEmbeddingsForOrganization(
+				organizationId,
+				request.projectKey,
+			);
+			if (!orgEmbeddingsPath) {
+				return {
+					success: true,
+					query: request.question,
+					total: 0,
+					strategyStep: 'no_org_corpus',
+					results: [],
+				};
+			}
+		}
 
 		const rawResponse = await this.executeSemanticSearch(
 			request.question,

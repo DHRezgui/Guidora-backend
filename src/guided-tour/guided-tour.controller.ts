@@ -247,9 +247,21 @@ export class GuidedTourController {
       'Merged at runtime after built-ins; does not replace SDK packs.',
   })
   @ApiResponse({ status: 200, description: 'Published blueprints for organization' })
-  async getPublishedJourneyBlueprints(@CurrentUser() user: any) {
+  @ApiQuery({
+    name: 'projectKey',
+    required: false,
+    description:
+      'Strict SDK project scope (flowVersion). Omitted or empty → generic `default` corpus only (not all organization blueprints).',
+  })
+  async getPublishedJourneyBlueprints(
+    @CurrentUser() user: any,
+    @Query('projectKey') projectKey?: string,
+  ) {
     const organizationId = this.getOrganizationId(user);
-    const blueprints = await this.journeyBlueprintService.listPublishedPayloads(organizationId);
+    const blueprints = await this.journeyBlueprintService.listPublishedPayloads(
+      organizationId,
+      projectKey,
+    );
     return {
       success: true,
       count: blueprints.length,
@@ -265,9 +277,21 @@ export class GuidedTourController {
     summary: 'List all custom blueprints (dashboard)',
     description: 'Includes draft and published rows for the current organization.',
   })
-  async listOrganizationJourneyBlueprints(@CurrentUser() user: any) {
+  @ApiQuery({
+    name: 'projectKey',
+    required: false,
+    description: 'Filter by SDK project key / flowVersion',
+  })
+  async listOrganizationJourneyBlueprints(
+    @CurrentUser() user: any,
+    @Query('projectKey') projectKey?: string,
+  ) {
     const organizationId = this.getOrganizationId(user);
-    const rows = await this.journeyBlueprintService.listForOrganization(organizationId, user);
+    const rows = await this.journeyBlueprintService.listForOrganization(
+      organizationId,
+      user,
+      projectKey,
+    );
     return {
       success: true,
       count: rows.length,
@@ -485,6 +509,7 @@ export class GuidedTourController {
     description: 'Returns all tours (active/inactive) of the user\'s organization'
   })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Filter by active status (true = active only, false = inactive only)' })
+  @ApiQuery({ name: 'flowVersion', required: false, type: String, description: 'Filter contextual tours by SDK flowVersion (matches trigger_conditions.contextualEngine.flowVersion)' })
   @ApiResponse({ 
     status: 200, 
     description: 'List of tours',
@@ -548,10 +573,17 @@ export class GuidedTourController {
     @CurrentUser() user: any,
     @Query('isActive') isActive?: boolean,
     @Query('includeSteps') includeSteps?: string,
+    @Query('flowVersion') flowVersion?: string,
   ) {
     const organizationId = this.getOrganizationId(user);
     const withSteps = includeSteps !== 'false';
-    const tours = await this.tourService.findAllByOrganization(organizationId, user, isActive, withSteps);
+    const tours = await this.tourService.findAllByOrganization(
+      organizationId,
+      user,
+      isActive,
+      withSteps,
+      flowVersion,
+    );
     return {
       success: true,
       count: tours.length,

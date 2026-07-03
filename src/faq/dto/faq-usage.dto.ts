@@ -25,6 +25,9 @@ export class FaqIndexStatusResponseDto {
   @ApiProperty({ example: false })
   needsReindex: boolean;
 
+  @ApiProperty({ example: 'test-11-v1' })
+  projectKey: string;
+
   @ApiProperty({ example: '2026-06-16T12:00:00.000Z', nullable: true })
   lastIndexedAt: string | null;
 }

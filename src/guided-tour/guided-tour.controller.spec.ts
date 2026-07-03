@@ -197,6 +197,7 @@ describe('GuidedTourController', () => {
         mockCurrentUser,
         undefined,
         true,
+        undefined,
       );
     });
 
@@ -211,6 +212,22 @@ describe('GuidedTourController', () => {
         mockCurrentUser,
         true,
         true,
+        undefined,
+      );
+    });
+
+    it('should filter by flowVersion when provided', async () => {
+      mockGuidedTourService.findAllByOrganization.mockResolvedValue([mockTourResponse]);
+
+      const result = await controller.findAll(mockCurrentUser, undefined, undefined, 'test-11-v1');
+
+      expect(result.count).toBe(1);
+      expect(service.findAllByOrganization).toHaveBeenCalledWith(
+        mockCurrentUser.organizationId,
+        mockCurrentUser,
+        undefined,
+        true,
+        'test-11-v1',
       );
     });
 

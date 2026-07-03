@@ -24,6 +24,15 @@ export class FaqSuggestionsQueryDto {
   @Min(1)
   @Max(10)
   limit?: number;
+
+  @ApiPropertyOptional({
+    description: 'FAQ pack / project key (SDK flowVersion)',
+    example: 'test-11-v1',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  projectKey?: string;
 }
 
 export class FaqSuggestionItemDto {

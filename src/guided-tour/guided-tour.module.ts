@@ -15,6 +15,7 @@ import { User } from '../user/entities/user.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrganizationModule } from '../organization/organization.module';
 import { ContextualJourneyBlueprintService } from './contextual-journey-blueprint.service';
+import { FaqModule } from '../faq/faq.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ContextualJourneyBlueprintService } from './contextual-journey-blueprin
       GuidedTourDeveloperTransfer,
     ]),
     OrganizationModule,
+    FaqModule,
   ],
   controllers: [GuidedTourController],
   providers: [

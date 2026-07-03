@@ -61,7 +61,13 @@ import {
   FaqImportGlobalResponseDto,
   FaqClearAllResponseDto,
 
+  DeleteFaqProjectResponseDto,
+
   ImportGlobalFaqDto,
+
+  RegisterFaqProjectDto,
+
+  RegisterFaqProjectResponseDto,
 
   SetFaqEntryActiveDto,
 
@@ -182,6 +188,8 @@ export class FaqController {
 
 			query.limit ?? 4,
 
+			query.projectKey,
+
 		);
 
 		return {
@@ -282,11 +290,17 @@ export class FaqController {
 
 	@ApiResponse({ status: 200, type: FaqIndexStatusResponseDto })
 
-	async getIndexStatus(@CurrentUser() user: any): Promise<FaqIndexStatusResponseDto> {
+	async getIndexStatus(
+
+		@Query('projectKey') projectKey: string | undefined,
+
+		@CurrentUser() user: any,
+
+	): Promise<FaqIndexStatusResponseDto> {
 
 		const organizationId = this.getOrganizationId(user);
 
-		const status = await this.faqEntryService.getIndexStatus(organizationId);
+		const status = await this.faqEntryService.getIndexStatus(organizationId, projectKey);
 
 		return {
 
@@ -362,13 +376,24 @@ export class FaqController {
 
 	@ApiResponse({ status: 200, type: FaqManageListResponseDto })
 
-	async listManage(@CurrentUser() user: any): Promise<FaqManageListResponseDto> {
+	async listManage(
+
+		@Query('projectKey') projectKey: string | undefined,
+
+		@CurrentUser() user: any,
+
+	): Promise<FaqManageListResponseDto> {
 
 		const organizationId = this.getOrganizationId(user);
 
 		const actorId = this.getActorId(user);
 
-		const items = await this.faqEntryService.listForOrganization(organizationId, actorId);
+		const [items, projectKeys, projectKeyCounts, projectKeyTourCounts] = await Promise.all([
+			this.faqEntryService.listForOrganization(organizationId, actorId, projectKey),
+			this.faqEntryService.listProjectKeysForOrganization(organizationId),
+			this.faqEntryService.listProjectKeyCounts(organizationId),
+			this.faqEntryService.listProjectKeyTourCounts(organizationId),
+		]);
 
 		return {
 
@@ -377,6 +402,92 @@ export class FaqController {
 			count: items.length,
 
 			items,
+
+			projectKeys,
+
+			projectKeyCounts,
+
+			projectKeyTourCounts,
+
+		};
+
+	}
+
+
+
+	@Roles(UserRole.ADMIN)
+
+	@Post('projects')
+
+	@HttpCode(HttpStatus.CREATED)
+
+	@ApiOperation({ summary: 'Register an FAQ project pack (visible even with zero questions)' })
+
+	@ApiResponse({ status: 201, type: RegisterFaqProjectResponseDto })
+
+	async registerProject(
+
+		@Body() dto: RegisterFaqProjectDto,
+
+		@CurrentUser() user: any,
+
+	): Promise<RegisterFaqProjectResponseDto> {
+
+		const organizationId = this.getOrganizationId(user);
+
+		const result = await this.faqEntryService.registerProject(organizationId, dto.projectKey);
+
+		return {
+
+			success: true,
+
+			projectKey: result.projectKey,
+
+			created: result.created,
+
+		};
+
+	}
+
+
+
+	@Roles(UserRole.ADMIN)
+
+	@Delete('projects/:projectKey')
+
+	@HttpCode(HttpStatus.OK)
+
+	@ApiOperation({ summary: 'Delete an FAQ project pack and all its entries' })
+
+	@ApiParam({ name: 'projectKey', type: String })
+
+	@ApiResponse({ status: 200, type: DeleteFaqProjectResponseDto })
+
+	async deleteProject(
+
+		@Param('projectKey') projectKey: string,
+
+		@CurrentUser() user: any,
+
+	): Promise<DeleteFaqProjectResponseDto> {
+
+		const organizationId = this.getOrganizationId(user);
+
+		const deleted = await this.faqEntryService.deleteProjectPack(organizationId, projectKey);
+
+		return {
+
+			success: true,
+
+			message:
+
+				deleted > 0
+
+					? `Projet supprimé — ${deleted} entrée(s) retirée(s)`
+
+					: 'Projet FAQ supprimé',
+
+			deleted,
 
 		};
 
@@ -532,11 +643,17 @@ export class FaqController {
 
 	@ApiResponse({ status: 200, type: FaqClearAllResponseDto })
 
-	async deleteAllEntries(@CurrentUser() user: any): Promise<FaqClearAllResponseDto> {
+	async deleteAllEntries(
+
+		@Query('projectKey') projectKey: string | undefined,
+
+		@CurrentUser() user: any,
+
+	): Promise<FaqClearAllResponseDto> {
 
 		const organizationId = this.getOrganizationId(user);
 
-		const deleted = await this.faqEntryService.removeAllForOrganization(organizationId);
+		const deleted = await this.faqEntryService.removeAllForOrganization(organizationId, projectKey);
 
 		return {
 
@@ -680,15 +797,33 @@ export class FaqController {
 
 	@ApiResponse({ status: 200, type: FaqReindexResponseDto })
 
-	async reindex(@CurrentUser() user: any): Promise<FaqReindexResponseDto> {
+	async reindex(
+
+		@Query('projectKey') projectKey: string | undefined,
+
+		@CurrentUser() user: any,
+
+	): Promise<FaqReindexResponseDto> {
 
 		const organizationId = this.getOrganizationId(user);
 
-		const activeItems = await this.faqEntryService.listActiveForOrganization(organizationId);
+		const activeItems = await this.faqEntryService.listActiveForOrganization(
+
+			organizationId,
+
+			projectKey,
+
+		);
 
 		try {
 
-			const embeddingsPath = await this.faqEntryService.rebuildEmbeddings(organizationId);
+			const embeddingsPath = await this.faqEntryService.rebuildEmbeddings(
+
+				organizationId,
+
+				projectKey,
+
+			);
 
 			return {
 
@@ -741,6 +876,8 @@ export class FaqController {
 			skipDuplicates: dto.skipDuplicates,
 
 			replaceExisting: dto.replaceExisting,
+
+			projectKey: dto.projectKey,
 
 		});
 

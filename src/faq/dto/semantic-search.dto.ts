@@ -25,8 +25,7 @@ export class SemanticSearchRequestDto {
   topK?: number;
 
   @ApiPropertyOptional({
-    description:
-      'Optional initial threshold for adaptive filtering. Backend tries thresholds in sequence (default: 0.70 -> 0.65 -> 0.60), then falls back to top-1 if still empty.',
+    description: 'Optional initial threshold for adaptive filtering. Backend tries thresholds in sequence (default: 0.70 -> 0.65 -> 0.60), then falls back to top-1 if still empty.',
     minimum: 0,
     maximum: 1,
     default: 0.7,
@@ -37,6 +36,15 @@ export class SemanticSearchRequestDto {
   @Min(0)
   @Max(1)
   minSimilarity?: number;
+
+  @ApiPropertyOptional({
+    description: 'FAQ pack / project key (SDK flowVersion). When omitted, uses the default pack.',
+    example: 'test-11-v1',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  projectKey?: string;
 }
 
 export class SemanticSearchResultDto {

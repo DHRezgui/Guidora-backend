@@ -15,6 +15,7 @@ import { ContextualScenario, PublishContextualDraftsDto } from './dto/publish-co
 import { UserRole } from '../user/entities/user.entity';
 import { TourEnvironment, TourSandboxStatus } from './entities/guided-tour.entity';
 import { GuidedTourAccessGrant } from './entities/guided-tour-access-grant.entity';
+import { FaqEntryService } from '../faq/faq-entry.service';
 
 describe('GuidedTourService', () => {
   let service: GuidedTourService;
@@ -66,6 +67,10 @@ describe('GuidedTourService', () => {
 
   const mockOrganizationService = {
     findById: jest.fn(),
+  };
+
+  const mockFaqEntryService = {
+    registerProject: jest.fn().mockResolvedValue({ projectKey: 'v2', created: true }),
   };
 
   const orgId = 'org-uuid-1234';
@@ -167,6 +172,10 @@ describe('GuidedTourService', () => {
         {
           provide: TourSemanticPythonWorkerService,
           useValue: mockTourSemanticWorker,
+        },
+        {
+          provide: FaqEntryService,
+          useValue: mockFaqEntryService,
         },
       ],
     }).compile();
@@ -369,6 +378,52 @@ describe('GuidedTourService', () => {
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         'tour.is_active = :isActive',
         { isActive: true },
+      );
+    });
+
+    it('should filter by flowVersion when provided', async () => {
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockTourEntity]),
+      };
+
+      mockTourRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+
+      await service.findAllByOrganization(orgId, undefined, undefined, true, 'test-11-v1');
+
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining("= :flowVersion"),
+        { flowVersion: 'test-11-v1' },
+      );
+    });
+
+    it('should filter unscoped tours when flowVersion is default', async () => {
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        setFindOptions: jest.fn().mockReturnThis(),
+        loadRelationCountAndMap: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+
+      mockTourRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+
+      await service.findAllByOrganization(orgId, undefined, undefined, true, 'default');
+
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('IS NULL'),
+        expect.objectContaining({ sdkLabPath: expect.stringContaining('sdk-tests') }),
       );
     });
 
@@ -941,6 +996,47 @@ describe('GuidedTourService', () => {
       expect(result.activated).toBe(1);
       expect(result.rejected).toBe(0);
       expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(mockFaqEntryService.registerProject).not.toHaveBeenCalled();
+    });
+
+    it('should register FAQ project for non-lab contextual publish', async () => {
+      const publishDto: PublishContextualDraftsDto = {
+        scenario: ContextualScenario.MEDIUM,
+        drafts: [
+          {
+            name: 'CRM onboarding',
+            targetUrl: '/app/crm/dashboard',
+            intent: 'primary-action',
+            confidence: 88,
+            score: 91,
+            flowVersioning: { flowVersion: 'crm-v2', flowSignature: 'sig-crm-1' },
+            diagnostics: { rejectedNoise: 2 },
+            steps: [
+              {
+                title: 'Open form',
+                content: 'Use the form to start',
+                targetSelector: '[data-tour-id="crm-form"]',
+              },
+              {
+                title: 'Validate',
+                content: 'Click validate to submit',
+                targetSelector: '[data-tour-id="crm-submit"]',
+                isPrimary: true,
+              },
+            ],
+          },
+        ],
+      };
+
+      mockOrganizationService.findById.mockResolvedValue({ id: orgId });
+      mockTourRepository.find.mockResolvedValue([]);
+      jest
+        .spyOn(service, 'create')
+        .mockResolvedValue({ ...mockTourEntity, id: 'new-contextual-tour' } as GuidedTour);
+
+      await service.publishContextualDrafts(publishDto, orgId, userId);
+
+      expect(mockFaqEntryService.registerProject).toHaveBeenCalledWith(orgId, 'crm-v2');
     });
 
     it('should refresh pending contextual sandbox tour for the same publisher', async () => {

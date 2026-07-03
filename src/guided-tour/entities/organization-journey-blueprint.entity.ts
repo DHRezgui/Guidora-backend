@@ -39,6 +39,10 @@ export class OrganizationJourneyBlueprint {
   @Column({ type: 'varchar', length: 32 })
   vertical: string;
 
+  /** SDK project key — aligns with FAQ `project_key` and contextual `flowVersion`. */
+  @Column({ type: 'varchar', length: 120, name: 'project_key', default: 'default' })
+  projectKey: string;
+
   @Column({ type: 'boolean', name: 'is_published', default: false })
   isPublished: boolean;
 

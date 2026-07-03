@@ -14,6 +14,7 @@ import type { FaqEditLockInfo } from '../faq-edit-lock.util';
 @Entity('faq_items')
 @Index('idx_faq_org_id', ['organizationId'])
 @Index('idx_faq_active', ['isActive'])
+@Index('idx_faq_org_project', ['organizationId', 'projectKey'])
 export class FaqItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -30,6 +31,10 @@ export class FaqItem {
 
   @Column({ type: 'text' })
   answer: string;
+
+  /** Scopes FAQ entries to a host app / flow (aligns with SDK `flowVersion`). */
+  @Column({ type: 'varchar', length: 120, name: 'project_key', default: 'default' })
+  projectKey: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   category: string | null;
@@ -64,6 +69,10 @@ export class FaqItem {
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt: Date;
+
+  /** Last change to fields that affect semantic embeddings (not views/feedback/edit-lock). */
+  @Column({ type: 'timestamptz', name: 'content_updated_at', default: () => 'NOW()' })
+  contentUpdatedAt: Date;
 
   @UpdateDateColumn({ type: 'timestamptz', name: 'updated_at' })
   updatedAt: Date;

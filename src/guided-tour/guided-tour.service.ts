@@ -63,14 +63,21 @@ import {
   isAdminOriginatedTour,
 } from './guided-tour-visibility.util';
 import {
+  applyTourProjectScopeFilter,
+  isSdkLabTargetTourUrl,
+  readTourProjectKeyFromEntity,
+} from './tour-project-scope.util';
+import {
   buildContextualPublishDedupeKey,
   getContextualEngineDerivativeSource,
+  isSdkLabPublishedTour,
   isSdkLabTargetPath,
   markTriggerConditionsAsManualDerivative,
   normalizeTourPath,
   participatesInContextualPublishDedupe,
 } from './guided-tour-lab.util';
 import { resolveContextualPublishDecision } from './contextual-publish-ownership.util';
+import { FaqEntryService } from '../faq/faq-entry.service';
 import {
   assertCanAdminTransferToProduction,
   assertCanApproveSandboxTour,
@@ -257,6 +264,7 @@ export class GuidedTourService {
     private accessGrantRepository: Repository<GuidedTourAccessGrant>,
     private organizationService: OrganizationService,
     private readonly tourSemanticWorker: TourSemanticPythonWorkerService,
+    private readonly faqEntryService: FaqEntryService,
   ) {}
 
   /**
@@ -552,6 +560,28 @@ export class GuidedTourService {
     return String(error);
   }
 
+  private async registerFaqProjectForContextualDraft(
+    organizationId: string,
+    draft: ContextualSuggestedDraftDto,
+  ): Promise<void> {
+    if (isSdkLabTargetPath(draft.targetUrl)) {
+      return;
+    }
+
+    const flowVersion = draft.flowVersioning?.flowVersion?.trim();
+    if (!flowVersion) {
+      return;
+    }
+
+    try {
+      await this.faqEntryService.registerProject(organizationId, flowVersion);
+    } catch (error) {
+      this.logger.warn(
+        `FAQ project auto-registration failed for flowVersion=${flowVersion}: ${this.getErrorMessage(error)}`,
+      );
+    }
+  }
+
   async publishContextualDrafts(
     dto: PublishContextualDraftsDto,
     organizationId: string,
@@ -844,6 +874,8 @@ export class GuidedTourService {
       } else {
         existingTours.push(tour);
       }
+
+      await this.registerFaqProjectForContextualDraft(organizationId, draft);
     }
 
     return {
@@ -1731,6 +1763,7 @@ export class GuidedTourService {
     actor?: TourPermissionActor | RequestAuthUser,
     isActive?: boolean,
     includeSteps = true,
+    flowVersion?: string,
   ): Promise<GuidedTour[]> {
     const query = this.tourRepository
       .createQueryBuilder('tour')
@@ -1779,16 +1812,46 @@ export class GuidedTourService {
       query.andWhere('tour.is_active = :isActive', { isActive });
     }
 
+    const normalizedFlowVersion = flowVersion?.trim();
+    if (normalizedFlowVersion) {
+      applyTourProjectScopeFilter(
+        (sql, params) => query.andWhere(sql, params),
+        normalizedFlowVersion,
+      );
+    }
+
     const tours = await query.getMany();
     const actorId = actor?.id;
     await this.attachSharingSummaryToTours(tours);
     if (actorId) {
       await this.attachActorAccessGrantsToTours(tours, actorId);
     }
-    if (isAdminActor(actor) && actor?.id) {
+    if (actorId && actor && (isAdminActor(actor) || isDeveloperActor(actor))) {
       return tours.filter((tour) => canActorViewTour(tour, actor));
     }
     return tours;
+  }
+
+  /**
+   * Compteurs par projectKey / flowVersion — uniquement les parcours visibles pour l'acteur
+   * (aligné sur la liste Parcours et le hub projet).
+   */
+  async listVisibleProjectKeyTourCounts(
+    organizationId: string,
+    actor?: TourPermissionActor | RequestAuthUser,
+  ): Promise<Record<string, number>> {
+    const tours = await this.findAllByOrganization(organizationId, actor, undefined, false);
+    const counts: Record<string, number> = {};
+
+    for (const tour of tours) {
+      if (isSdkLabPublishedTour(tour) || isSdkLabTargetTourUrl(tour.targetUrl)) {
+        continue;
+      }
+      const projectKey = readTourProjectKeyFromEntity(tour);
+      counts[projectKey] = (counts[projectKey] ?? 0) + 1;
+    }
+
+    return counts;
   }
 
   /** Indicateurs de partage org (lecture / collab) pour les badges carte. */

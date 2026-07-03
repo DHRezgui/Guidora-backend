@@ -91,6 +91,10 @@ import {
 
 } from './blueprint-permissions.util';
 
+import { FaqEntryService } from '../faq/faq-entry.service';
+
+import { normalizeFaqProjectKey } from '../faq/faq-project-key.util';
+
 
 
 @Injectable()
@@ -110,6 +114,8 @@ export class ContextualJourneyBlueprintService {
     @InjectRepository(User)
 
     private readonly userRepository: Repository<User>,
+
+    private readonly faqEntryService: FaqEntryService,
 
   ) {}
 
@@ -389,11 +395,15 @@ export class ContextualJourneyBlueprintService {
 
     actor?: BlueprintPermissionActor,
 
+    projectKey?: string,
+
   ): Promise<OrganizationJourneyBlueprint[]> {
+
+    const normalizedKey = projectKey ? normalizeFaqProjectKey(projectKey) : undefined;
 
     const rows = await this.blueprintRepo.find({
 
-      where: { organizationId },
+      where: normalizedKey ? { organizationId, projectKey: normalizedKey } : { organizationId },
 
       order: { updatedAt: 'DESC' },
 
@@ -435,11 +445,15 @@ export class ContextualJourneyBlueprintService {
 
    */
 
-  async listPublishedPayloads(organizationId: string): Promise<Record<string, unknown>[]> {
+  async listPublishedPayloads(
+    organizationId: string,
+    projectKey?: string,
+  ): Promise<Record<string, unknown>[]> {
+    const normalizedKey = normalizeFaqProjectKey(projectKey);
 
     const rows = await this.blueprintRepo.find({
 
-      where: { organizationId, isPublished: true },
+      where: { organizationId, isPublished: true, projectKey: normalizedKey },
 
       order: { updatedAt: 'ASC' },
 
@@ -447,6 +461,24 @@ export class ContextualJourneyBlueprintService {
 
     return rows.map((row) => row.payload);
 
+  }
+
+  async listProjectKeyBlueprintCounts(organizationId: string): Promise<Record<string, number>> {
+    const rows = await this.blueprintRepo
+      .createQueryBuilder('bp')
+      .select('bp.project_key', 'projectKey')
+      .addSelect('COUNT(*)', 'count')
+      .where('bp.organization_id = :organizationId', { organizationId })
+      .groupBy('bp.project_key')
+      .orderBy('bp.project_key', 'ASC')
+      .getRawMany<{ projectKey: string; count: string }>();
+
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      if (!row.projectKey) continue;
+      counts[normalizeFaqProjectKey(row.projectKey)] = Number(row.count) || 0;
+    }
+    return counts;
   }
 
 
@@ -468,6 +500,8 @@ export class ContextualJourneyBlueprintService {
     const blueprintId = String(payload.id);
 
     const vertical = String(payload.vertical);
+
+    const projectKey = normalizeFaqProjectKey(dto.projectKey);
 
 
 
@@ -493,6 +527,8 @@ export class ContextualJourneyBlueprintService {
 
       vertical,
 
+      projectKey,
+
       isPublished: dto.isPublished ?? false,
 
       payload,
@@ -502,6 +538,8 @@ export class ContextualJourneyBlueprintService {
     });
 
     const saved = await this.blueprintRepo.save(row);
+
+    await this.faqEntryService.registerProject(organizationId, projectKey);
 
     return this.hydrateBlueprintRow(saved, actor);
 
@@ -586,6 +624,12 @@ export class ContextualJourneyBlueprintService {
     row.vertical = String(payload.vertical);
 
     row.payload = payload;
+
+    if (dto.projectKey !== undefined) {
+      const projectKey = normalizeFaqProjectKey(dto.projectKey);
+      row.projectKey = projectKey;
+      await this.faqEntryService.registerProject(organizationId, projectKey);
+    }
 
     if (dto.isPublished !== undefined) {
 

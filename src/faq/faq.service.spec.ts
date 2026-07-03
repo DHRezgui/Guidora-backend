@@ -19,7 +19,29 @@ describe('FaqService', () => {
     service = new FaqService(faqEntryService);
   });
 
+  it('should return empty results when org has no FAQ corpus for the requested pack', async () => {
+    (faqEntryService.ensureEmbeddingsForOrganization as jest.Mock).mockResolvedValue(null);
+
+    const result = await service.semanticSearch(
+      {
+        question: 'comment creer un compte',
+        topK: 3,
+        projectKey: 'test-11-v1',
+      },
+      'org-123',
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.total).toBe(0);
+    expect(result.strategyStep).toBe('no_org_corpus');
+    expect(result.results).toEqual([]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('should return parsed semantic search response', async () => {
+    (faqEntryService.ensureEmbeddingsForOrganization as jest.Mock).mockResolvedValue(
+      '/tmp/faq_embeddings.json',
+    );
     const child = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
       stderr: EventEmitter;
