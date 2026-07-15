@@ -1,27 +1,28 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { spawn } from 'child_process';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import {
   PredictionFeaturesDto,
   PredictionRequestDto,
   PredictionResponseDto,
+  PredictionResultDto,
   ModelHealthDto,
 } from './dto/prediction.dto';
+import { enrichAbandonmentFeatures } from './abandonment-derived-features';
+import { AbandonmentPythonWorkerService } from './abandonment-python-worker.service';
 
 @Injectable()
 export class PredictionService implements OnModuleInit {
   private readonly logger = new Logger(PredictionService.name);
   private modelPath: string;
   private featurePath: string;
-  private pythonScriptPath: string;
-  private pythonExecutable: string;
   private modelLoaded = false;
   private modelVersion = '1.0';
   private featureNames: string[] = [];
+  private readonly sessionRateLimitMs = 10_000;
+  private readonly sessionLastRequestAt = new Map<string, number>();
 
-  constructor() {
-    // Resolve workspace root whether process starts from repo root or backend/
+  constructor(private readonly abandonmentWorker: AbandonmentPythonWorkerService) {
     const cwd = process.cwd();
     const workspaceRoot = path.basename(cwd).toLowerCase() === 'backend'
       ? path.resolve(cwd, '..')
@@ -29,26 +30,12 @@ export class PredictionService implements OnModuleInit {
 
     this.modelPath = path.join(workspaceRoot, 'ml', 'models', 'lightgbm_model.pkl');
     this.featurePath = path.join(workspaceRoot, 'ml', 'models', 'feature_names.json');
-    this.pythonScriptPath = path.join(workspaceRoot, 'ml', 'predict.py');
-
-    const envPython = process.env.PYTHON_EXECUTABLE?.trim();
-    if (envPython) {
-      this.pythonExecutable = envPython;
-    } else {
-      this.pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
-    }
   }
 
   async onModuleInit(): Promise<void> {
-    /**
-     * Initialize prediction service on application startup
-     * - Verify model and features files exist
-     * - Load feature names
-     */
     try {
       const filesReady = await this.checkModelFiles();
       await this.loadFeatureNames();
-      await this.testPythonEnvironment();
       this.modelLoaded = filesReady;
 
       if (this.modelLoaded) {
@@ -59,13 +46,9 @@ export class PredictionService implements OnModuleInit {
     } catch (error) {
       this.modelLoaded = false;
       this.logger.error(`Failed to initialize prediction service: ${this.getErrorMessage(error)}`);
-      // Don't fail module init - just log warning
     }
   }
 
-  /**
-   * Verify model and feature files exist
-   */
   private async checkModelFiles(): Promise<boolean> {
     const files = { model: this.modelPath, features: this.featurePath };
     let allFound = true;
@@ -83,9 +66,6 @@ export class PredictionService implements OnModuleInit {
     return allFound;
   }
 
-  /**
-   * Load feature names from feature_names.json
-   */
   private async loadFeatureNames(): Promise<void> {
     try {
       const content = await fs.readFile(this.featurePath, 'utf-8');
@@ -94,13 +74,12 @@ export class PredictionService implements OnModuleInit {
       this.logger.debug(`Loaded ${this.featureNames.length} feature names`);
     } catch (error) {
       this.logger.warn(`Could not load feature names: ${this.getErrorMessage(error)}`);
-      // Set defaults
       this.featureNames = [
         'timeOnPage',
+        'pageTime',
         'scrollDepth',
         'clickMisses',
         'hesitations',
-        'abandonmentRisk',
         'helpTriggered',
         'hasError',
         'multiplePages',
@@ -114,24 +93,12 @@ export class PredictionService implements OnModuleInit {
     }
   }
 
-  /**
-   * Test Python environment and model loading
-   */
-  private async testPythonEnvironment(): Promise<void> {
-    try {
-    } catch (error) {
-      // Python environment will be tested on first prediction
-    }
-  }
-
-  /**
-   * Make real-time abandonment prediction
-   */
   async predict(requestDto: PredictionRequestDto): Promise<PredictionResponseDto> {
     const startTime = Date.now();
 
     try {
-      // Validate model is loaded
+      this.checkSessionRateLimit(requestDto.sessionId);
+
       if (!this.modelLoaded) {
         return {
           success: false,
@@ -140,25 +107,43 @@ export class PredictionService implements OnModuleInit {
         };
       }
 
-      // Compute derived features if not provided
       const features = this.computeDerivedFeatures(requestDto.features);
-
-      // Prepare input for Python script
-      const inputData = {
+      const threshold = requestDto.threshold ?? 0.5;
+      const shouldExplain = Boolean(requestDto.explain && requestDto.debug);
+      const workerResponse = await this.abandonmentWorker.infer(
         features,
-      };
-
-      // Call prediction script
-      const prediction = await this.executePredictionScript(
-        inputData,
-        requestDto.threshold || 0.5,
+        threshold,
+        { explain: shouldExplain, debug: requestDto.debug },
+        shouldExplain ? 12_000 : undefined,
       );
 
       const executionTime = Date.now() - startTime;
 
+      if (!workerResponse.ok) {
+        const reason =
+          workerResponse.reason === 'timeout' ||
+          workerResponse.reason === 'worker_crashed' ||
+          workerResponse.reason === 'worker_unavailable'
+            ? 'worker_unavailable'
+            : workerResponse.reason;
+
+        return {
+          success: false,
+          reason,
+          error: workerResponse.error ?? 'Abandonment prediction worker unavailable',
+          timestamp: new Date().toISOString(),
+          metadata: {
+            modelVersion: this.modelVersion || '1.0',
+            executionTimeMs: executionTime,
+          },
+        };
+      }
+
+      this.recordSessionRequest(requestDto.sessionId);
+
       return {
         success: true,
-        prediction,
+        prediction: this.mapWorkerPrediction(workerResponse.result),
         timestamp: new Date().toISOString(),
         metadata: {
           modelVersion: this.modelVersion || '1.0',
@@ -166,6 +151,9 @@ export class PredictionService implements OnModuleInit {
         },
       };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       const executionTime = Date.now() - startTime;
       const errorMessage = this.getErrorMessage(error);
       this.logger.error(`Prediction error: ${errorMessage}`);
@@ -182,130 +170,84 @@ export class PredictionService implements OnModuleInit {
     }
   }
 
-  /**
-   * Compute derived features from raw features
-   */
-  private computeDerivedFeatures(features: PredictionFeaturesDto): Record<string, number> {
-    const result = { ...features };
+  async warmupAbandonmentWorker(): Promise<{
+    success: boolean;
+    workerReady: boolean;
+    modelLoaded: boolean;
+  }> {
+    const warmed = await this.abandonmentWorker.warmup();
+    return {
+      success: warmed,
+      workerReady: warmed,
+      modelLoaded: this.modelLoaded,
+    };
+  }
 
-    // Ensure all expected fields are present
-    if (result.timeOnPage && result.multiplePages) {
-      result.timePerPage = result.timeOnPage / (result.multiplePages || 1);
-    } else if (!result.timePerPage) {
-      result.timePerPage = result.timeOnPage || 0;
-    }
-
-    // Click miss rate
-    if (!result.clickMissRate) {
-      result.clickMissRate = (result.clickMisses || 0) > 0 ? 
-        Math.min((result.clickMisses / 5), 1.0) : 0; // Normalize to 0-1
-    }
-
-    // Hesitation rate
-    if (!result.hesitationRate) {
-      result.hesitationRate = (result.hesitations || 0) > 0 ?
-        Math.min((result.hesitations / 5), 1.0) : 0;
-    }
-
-    // Friction score (weighted combination)
-    if (!result.frictionScore) {
-      result.frictionScore = (
-        (result.clickMissRate * 0.55) +
-        (result.hesitationRate * 0.45)
+  private checkSessionRateLimit(sessionId?: string): void {
+    const key = sessionId?.trim() || 'anonymous';
+    const now = Date.now();
+    const last = this.sessionLastRequestAt.get(key);
+    if (last !== undefined && now - last < this.sessionRateLimitMs) {
+      throw new HttpException(
+        'Abandonment prediction rate limit exceeded (max 1 request per 10 seconds per session).',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-
-    // High friction flag
-    if (result.frictionScore !== undefined && result.frictionScore > 0.5) {
-      result.highFriction = 1;
-    } else {
-      result.highFriction = result.highFriction || 0;
-    }
-
-    // Multiple issues flag
-    const issueCount = (result.clickMisses || 0) + (result.hesitations || 0);
-    if (issueCount > 2) {
-      result.multipleIssues = 1;
-    } else {
-      result.multipleIssues = result.multipleIssues || 0;
-    }
-
-    return result;
   }
 
-  /**
-   * Execute Python prediction script via child_process
-   */
-  private async executePredictionScript(
-    inputData: { features: Record<string, number> },
-    threshold: number,
-  ): Promise<any> {
-    try {
-      // Spawn Python process with stdin
-      const child = spawn(this.pythonExecutable, [
-        this.pythonScriptPath,
-        '--threshold',
-        threshold.toString(),
-      ]);
+  private recordSessionRequest(sessionId?: string): void {
+    const key = sessionId?.trim() || 'anonymous';
+    this.sessionLastRequestAt.set(key, Date.now());
+  }
 
-      let stdout = '';
-      let stderr = '';
+  private mapWorkerPrediction(result: Record<string, unknown>): PredictionResultDto {
+    const mapped: PredictionResultDto = {
+      abandonmentRisk: Number(result.abandonmentRisk),
+      willAbandon: Boolean(result.willAbandon),
+      confidence: Number(result.confidence),
+      threshold: Number(result.threshold),
+    };
 
-      // Collect output
-      child.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      // Send input via stdin
-      child.stdin.write(JSON.stringify(inputData));
-      child.stdin.end();
-
-      // Wait for process to complete
-      return new Promise((resolve, reject) => {
-        child.on('error', (error) => {
-          reject(new Error(`Failed to start python process (${this.pythonExecutable}): ${error.message}`));
-        });
-
-        child.on('close', (code) => {
-          try {
-            if (stderr) {
-              this.logger.debug(`Python script stderr: ${stderr}`);
-            }
-
-            if (code !== 0) {
-              reject(new Error(`Python process exited with code ${code}: ${stderr}`));
-              return;
-            }
-
-            const result = JSON.parse(stdout);
-
-            if (!result.success) {
-              reject(new Error(result.error || 'Python script failed'));
-              return;
-            }
-
-            resolve(result.prediction);
-          } catch (error) {
-            reject(error);
-          }
-        });
-      });
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        // JSON parse error - Python script output was malformed
-        throw new Error(`Invalid prediction response: ${error.message}`);
+    const explanation = result.explanation;
+    if (explanation && typeof explanation === 'object') {
+      const raw = explanation as Record<string, unknown>;
+      const topFeatures = Array.isArray(raw.topFeatures)
+        ? raw.topFeatures
+            .filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
+            .map((row) => ({
+              feature: String(row.feature ?? ''),
+              contribution: Number(row.contribution),
+              value: Number(row.value),
+            }))
+        : [];
+      if (topFeatures.length > 0) {
+        mapped.explanation = {
+          topFeatures,
+          expectedValue:
+            raw.expectedValue === undefined || raw.expectedValue === null
+              ? undefined
+              : Number(raw.expectedValue),
+          baseProbability:
+            raw.baseProbability === undefined || raw.baseProbability === null
+              ? undefined
+              : Number(raw.baseProbability),
+        };
       }
-      throw error;
     }
+
+    return mapped;
   }
 
-  /**
-   * Check model health and readiness
-   */
+  private computeDerivedFeatures(features: PredictionFeaturesDto): Record<string, number> {
+    const result = { ...features } as Record<string, number>;
+
+    if (result.abandonmentRisk === undefined || result.abandonmentRisk === null) {
+      result.abandonmentRisk = 0;
+    }
+
+    return enrichAbandonmentFeatures(result);
+  }
+
   async getModelHealth(): Promise<ModelHealthDto> {
     try {
       const modelExists = await this.fileExists(this.modelPath);
@@ -314,21 +256,20 @@ export class PredictionService implements OnModuleInit {
       return {
         success: true,
         modelLoaded: this.modelLoaded && modelExists,
+        workerReady: this.abandonmentWorker.isWarmed(),
         modelVersion: this.modelVersion || '1.0',
         featureCount: this.featureNames.length,
         lastUpdated: new Date().toISOString(),
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
         modelLoaded: false,
+        workerReady: false,
       };
     }
   }
 
-  /**
-   * Check if file exists
-   */
   private async fileExists(filePath: string): Promise<boolean> {
     try {
       await fs.access(filePath);

@@ -33,19 +33,29 @@ export class BehaviorAnalysisService {
 
     // Calculer le risque d'abandon
     const abandonmentRisk = this.calculateAbandonmentRisk(events, pageAnalysis);
+    const userId = events.find((event) => event.userId)?.userId;
 
     // Créer l'analyse
-    const analysis = this.analysisRepository.create({
+    const analysisPayload = {
       sessionId,
       organizationId,
+      userId,
       pageUrl: events[0].pageUrl,
-      timeOnPage: pageAnalysis.avgTimeOnPage,
+      timeOnPage: Math.round(pageAnalysis.avgTimeOnPage),
       scrollDepth: pageAnalysis.avgScrollDepth,
       clickMisses: pageAnalysis.clickMisses,
       hesitations: pageAnalysis.hesitations,
       abandonmentRisk,
       helpTriggered: abandonmentRisk > 0.65, // Seuil configurable
+    };
+
+    const existing = await this.analysisRepository.findOne({
+      where: { sessionId, organizationId },
     });
+
+    const analysis = existing
+      ? Object.assign(existing, analysisPayload)
+      : this.analysisRepository.create(analysisPayload);
 
     // Sauvegarder l'analyse
     const savedAnalysis = await this.analysisRepository.save(analysis);

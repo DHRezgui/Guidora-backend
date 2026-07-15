@@ -71,6 +71,25 @@ export class PredictionFeaturesDto {
   @Max(1)
   multiplePages: 0 | 1;
 
+  @ApiPropertyOptional({
+    example: 45,
+    description: 'Seconds since last user interaction (SDK idleSeconds)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  idleSeconds?: number;
+
+  @ApiPropertyOptional({
+    example: 28,
+    description:
+      'Seconds on the current URL (SDK pageTime). When omitted, defaults to timeOnPage.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  pageTime?: number;
+
   // Derived features (optional - can be computed server-side)
   @ApiPropertyOptional({ example: 41.5 })
   @IsOptional()
@@ -141,6 +160,57 @@ export class PredictionRequestDto {
   @IsOptional()
   @IsUUID()
   sessionId?: string; // Optional session identifier
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Request SHAP feature contributions (requires debug=true)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  explain?: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Debug mode gate for expensive explainability paths',
+  })
+  @IsOptional()
+  @IsBoolean()
+  debug?: boolean;
+}
+
+export class AbandonmentFeatureContributionDto {
+  @ApiProperty({ example: 'frictionScore' })
+  @IsString()
+  feature: string;
+
+  @ApiProperty({ example: 0.1245 })
+  @IsNumber()
+  contribution: number;
+
+  @ApiProperty({ example: 0.82 })
+  @IsNumber()
+  value: number;
+}
+
+export class AbandonmentMlExplanationDto {
+  @ApiProperty({ type: [AbandonmentFeatureContributionDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AbandonmentFeatureContributionDto)
+  topFeatures: AbandonmentFeatureContributionDto[];
+
+  @ApiPropertyOptional({ example: 0.35 })
+  @IsOptional()
+  @IsNumber()
+  expectedValue?: number;
+
+  @ApiPropertyOptional({
+    example: 0.35,
+    description: 'Baseline abandonment probability (0-1) derived from SHAP expected value',
+  })
+  @IsOptional()
+  @IsNumber()
+  baseProbability?: number;
 }
 
 export class PredictionResultDto {
@@ -159,6 +229,12 @@ export class PredictionResultDto {
   @ApiProperty({ example: 0.5 })
   @IsNumber()
   threshold: number;
+
+  @ApiPropertyOptional({ type: AbandonmentMlExplanationDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AbandonmentMlExplanationDto)
+  explanation?: AbandonmentMlExplanationDto;
 }
 
 export class PredictionMetadataDto {
@@ -186,6 +262,14 @@ export class PredictionResponseDto {
   @IsOptional()
   @IsString()
   error?: string; // Error message if failed
+
+  @ApiPropertyOptional({
+    example: 'worker_unavailable',
+    description: 'Machine-readable failure reason when success is false',
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 
   @ApiPropertyOptional({ example: '2026-03-25T10:30:00.000Z' })
   @IsOptional()
@@ -244,6 +328,14 @@ export class ModelHealthDto {
   @ApiProperty({ example: true })
   @IsBoolean()
   modelLoaded: boolean;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Whether the persistent Python abandonment worker is warmed up',
+  })
+  @IsOptional()
+  @IsBoolean()
+  workerReady?: boolean;
 
   @ApiPropertyOptional({ example: '1.0' })
   @IsOptional()

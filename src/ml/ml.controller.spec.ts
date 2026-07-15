@@ -16,6 +16,7 @@ describe('MlController', () => {
   const predictionService = {
     predict: jest.fn(),
     getModelHealth: jest.fn(),
+    warmupAbandonmentWorker: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -47,10 +48,13 @@ describe('MlController', () => {
 
   it('should return dataset stats with quality indicators', async () => {
     datasetService.getDatasetQualityReport.mockResolvedValue({
-      schemaVersion: '1.1',
+      schemaVersion: '1.2',
       totalSamples: 120,
       positiveSamples: 30,
       negativeSamples: 90,
+      realLabels: 40,
+      syntheticLabels: 80,
+      realLabelRatio: 40 / 120,
       imbalanceRatio: 0.25,
       missingValues: 0,
       isEnoughDataForTraining: true,
@@ -62,7 +66,8 @@ describe('MlController', () => {
 
     expect(result.success).toBe(true);
     expect(result.stats.totalSamples).toBe(120);
-    expect(result.stats.schemaVersion).toBe('1.1');
+    expect(result.stats.schemaVersion).toBe('1.2');
+    expect(result.stats.realLabels).toBe(40);
     expect(datasetService.getDatasetQualityReport).toHaveBeenCalledWith('org-1');
   });
 
@@ -177,6 +182,7 @@ describe('MlController', () => {
     predictionService.getModelHealth.mockResolvedValue({
       success: true,
       modelLoaded: true,
+      workerReady: true,
       modelVersion: '1.0',
       featureCount: 13,
       lastUpdated: '2026-03-25T10:30:00.000Z',
@@ -186,7 +192,22 @@ describe('MlController', () => {
 
     expect(result.success).toBe(true);
     expect(result.modelLoaded).toBe(true);
+    expect(result.workerReady).toBe(true);
     expect(result.featureCount).toBe(13);
     expect(predictionService.getModelHealth).toHaveBeenCalled();
+  });
+
+  it('should warm up abandonment worker', async () => {
+    predictionService.warmupAbandonmentWorker.mockResolvedValue({
+      success: true,
+      workerReady: true,
+      modelLoaded: true,
+    });
+
+    const result = await controller.warmupAbandonmentWorker();
+
+    expect(result.success).toBe(true);
+    expect(result.workerReady).toBe(true);
+    expect(predictionService.warmupAbandonmentWorker).toHaveBeenCalled();
   });
 });

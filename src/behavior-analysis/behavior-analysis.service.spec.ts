@@ -59,6 +59,7 @@ describe('BehaviorAnalysisService', () => {
         {
           provide: getRepositoryToken(BehaviorAnalysis),
           useValue: {
+            findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
           },
@@ -92,6 +93,7 @@ describe('BehaviorAnalysisService', () => {
       ];
 
       eventRepo.find.mockResolvedValue(events);
+      analysisRepo.findOne.mockResolvedValue(null);
       analysisRepo.create.mockReturnValue(mockAnalysis as BehaviorAnalysis);
       analysisRepo.save.mockResolvedValue(mockAnalysis as BehaviorAnalysis);
 
@@ -105,6 +107,7 @@ describe('BehaviorAnalysisService', () => {
         expect.objectContaining({
           sessionId: 'sess-uuid-1',
           organizationId: 'org-uuid-1',
+          userId: 'usr-uuid-1',
           pageUrl: '/dashboard',
         }),
       );
@@ -140,6 +143,7 @@ describe('BehaviorAnalysisService', () => {
       ];
 
       eventRepo.find.mockResolvedValue(events);
+      analysisRepo.findOne.mockResolvedValue(null);
       analysisRepo.create.mockImplementation((dto) => dto as BehaviorAnalysis);
       analysisRepo.save.mockImplementation(async (entity) => entity as BehaviorAnalysis);
 
@@ -159,6 +163,7 @@ describe('BehaviorAnalysisService', () => {
       // Mock analyzeSession indirectly via eventRepo
       const events = [makeMockEvent()];
       eventRepo.find.mockResolvedValue(events);
+      analysisRepo.findOne.mockResolvedValue(null);
       analysisRepo.create.mockReturnValue(mockAnalysis as BehaviorAnalysis);
       analysisRepo.save.mockResolvedValue(mockAnalysis as BehaviorAnalysis);
 

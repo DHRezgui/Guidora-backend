@@ -1,5 +1,8 @@
 import { Controller, Get, Param, HttpCode, HttpStatus, Post, UseGuards, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { AllowDashboardJwtOnSdkRoute } from '../auth/decorators/allow-dashboard-jwt-on-sdk-route.decorator';
+import { AllowSdkScopes } from '../auth/decorators/allow-sdk-scopes.decorator';
+import { RequireSdkScopes } from '../auth/decorators/require-sdk-scopes.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../user/entities/user.entity';
@@ -230,6 +233,9 @@ export class MlController {
         totalSamples: quality.totalSamples,
         positiveSamples: quality.positiveSamples,
         negativeSamples: quality.negativeSamples,
+        realLabels: quality.realLabels,
+        syntheticLabels: quality.syntheticLabels,
+        realLabelRatio: quality.realLabelRatio,
         imbalanceRatio: quality.imbalanceRatio,
         avgFeaturesPerSample: quality.featuresPerSample,
         missingValues: quality.missingValues,
@@ -305,6 +311,9 @@ export class MlController {
 
   // Real-time prediction endpoints
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER, UserRole.USER)
+  @AllowSdkScopes('ml:predict')
+  @AllowDashboardJwtOnSdkRoute()
+  @RequireSdkScopes('ml:predict')
   @Post('predictions/abandonment')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -364,6 +373,30 @@ export class MlController {
     @Body() requestDto: PredictionRequestDto,
   ): Promise<PredictionResponseDto> {
     return this.predictionService.predict(requestDto);
+  }
+
+  @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
+  @Post('predictions/abandonment/warmup')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Warm up the persistent abandonment Python worker',
+    description:
+      'Loads the LightGBM model once in a keep-alive worker process. ' +
+      'Also runs automatically on backend start when ML_ABANDONMENT_AUTO_WARMUP=true.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Worker warmup status',
+    schema: {
+      example: {
+        success: true,
+        workerReady: true,
+        modelLoaded: true,
+      },
+    },
+  })
+  async warmupAbandonmentWorker() {
+    return this.predictionService.warmupAbandonmentWorker();
   }
 
   /**
@@ -453,6 +486,7 @@ export class MlController {
       example: {
         success: true,
         modelLoaded: true,
+        workerReady: true,
         modelVersion: '1.0',
         featureCount: 14,
         lastUpdated: '2026-03-25T10:30:00.000Z',

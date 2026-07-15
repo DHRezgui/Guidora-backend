@@ -315,17 +315,26 @@ Invoke-RestMethod `
 
 ## Authentication
 
-All endpoints require authentication via JWT token in the `Authorization` header:
+Endpoints accept either:
+
+1. **Dashboard JWT** — `Authorization: Bearer <JWT>` with role `ADMIN`, `DEVELOPER`, or `USER` (abandonment only).
+2. **SDK integration PAT** — `Authorization: Bearer td_sdk_...` with scope **`ml:predict`** (abandonment route only).
 
 ```
-Authorization: Bearer <JWT_TOKEN>
+Authorization: Bearer <JWT_OR_PAT>
 ```
 
-### Required Roles
+Batch and dataset routes remain **dashboard JWT only** (`ADMIN` / `DEVELOPER`).
 
-- **`/ml/predictions/abandonment`**: `ADMIN`, `DEVELOPER`, `USER`
-- **`/ml/predictions/batch`**: `ADMIN`, `DEVELOPER`
-- **`/ml/predictions/health`**: `ADMIN`, `DEVELOPER`
+### Required Roles / Scopes
+
+- **`/ml/predictions/abandonment`**: JWT `ADMIN` | `DEVELOPER` | `USER`, or PAT with `ml:predict`
+- **`/ml/predictions/batch`**: JWT `ADMIN` | `DEVELOPER` only
+- **`/ml/predictions/health`**: JWT `ADMIN` | `DEVELOPER` only
+
+### Rate limiting
+
+`POST /ml/predictions/abandonment` is limited to **1 request per 10 seconds per `sessionId`** (HTTP 429). The SDK also caches predictions client-side (~20s).
 
 ---
 

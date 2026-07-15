@@ -17,6 +17,10 @@ export interface FeatureVector {
 
   // Label (supervised learning)
   label: 0 | 1; // 0=success, 1=abandoned
+  labelSource: 'real' | 'synthetic';
+  /** Ground truth from user_progress when status is terminal; null when synthetic fallback was used. */
+  isAbandoned?: boolean | null;
+  progressStatus?: string | null;
 
   // Metadata
   sessionId: string;
@@ -32,6 +36,10 @@ export interface MLDataset {
     generatedAt: Date;
     version: string;
     featureNames: string[];
+    labelSourceCounts?: {
+      real: number;
+      synthetic: number;
+    };
   };
 }
 
