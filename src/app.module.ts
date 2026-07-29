@@ -37,6 +37,8 @@ import { BehaviorEvent } from './tracking/entities/behavior_event.entity';
 import { BehaviorAnalysis } from './behavior-analysis/entities/behavior-analysis.entity';
 import { DataAggregationModule } from './data-aggregation/data-aggregation.module';
 import { MlModule } from './ml/ml.module';
+import { SupportModule } from './support/support.module';
+import { SupportTicket } from './support/entities/support-ticket.entity';
 
 @Module({
   imports: [
@@ -77,6 +79,7 @@ import { MlModule } from './ml/ml.module';
         SdkSessionToken,
         FaqItem,
         FaqProject,
+        SupportTicket,
       ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development',
@@ -95,6 +98,7 @@ import { MlModule } from './ml/ml.module';
     BehaviorAnalysisModule,
     DataAggregationModule,
     MlModule,
+    SupportModule,
   ],
   controllers: [AppController],  
   providers: [

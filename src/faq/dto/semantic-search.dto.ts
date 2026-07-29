@@ -25,7 +25,8 @@ export class SemanticSearchRequestDto {
   topK?: number;
 
   @ApiPropertyOptional({
-    description: 'Optional initial threshold for adaptive filtering. Backend tries thresholds in sequence (default: 0.70 -> 0.65 -> 0.60), then falls back to top-1 if still empty.',
+    description:
+      'Optional initial threshold for adaptive filtering. Backend tries thresholds in sequence (default: 0.70 -> 0.65 -> 0.60). Low-confidence top-1 is only returned if score >= FAQ_FALLBACK_MIN_SCORE (default 0.55); otherwise no_confident_match (empty). Lexical near-exact boost is applied before thresholds (FAQ_LEXICAL_BOOST).',
     minimum: 0,
     maximum: 1,
     default: 0.7,
@@ -80,7 +81,7 @@ export class SemanticSearchResponseDto {
   @ApiPropertyOptional({
     example: 'threshold_0.7',
     description:
-      'Adaptive strategy step used for this response: threshold_<value> or fallback_top1',
+      'Adaptive strategy step: threshold_<value>, fallback_top1 (gated), no_confident_match, no_results, no_org_corpus',
   })
   strategyStep?: string;
 

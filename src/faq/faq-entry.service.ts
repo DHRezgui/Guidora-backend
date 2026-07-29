@@ -698,6 +698,11 @@ export class FaqEntryService {
       return true;
     }
 
+    const indexedCount = this.countIndexedFaqItems(embeddingsPath);
+    if (indexedCount !== null && indexedCount !== activeCount) {
+      return true;
+    }
+
     const row = await this.faqRepository
       .createQueryBuilder('item')
       .select('MAX(item.contentUpdatedAt)', 'maxContentUpdatedAt')
@@ -713,6 +718,20 @@ export class FaqEntryService {
     const latestChangeMs = new Date(row.maxContentUpdatedAt).getTime();
     const indexMtimeMs = fs.statSync(embeddingsPath).mtimeMs;
     return latestChangeMs > indexMtimeMs;
+  }
+
+  /** Returns indexed item count, or null if the file cannot be parsed. */
+  private countIndexedFaqItems(embeddingsPath: string): number | null {
+    try {
+      const raw = fs.readFileSync(embeddingsPath, 'utf-8');
+      const payload = JSON.parse(raw) as { items?: unknown };
+      if (!Array.isArray(payload.items)) {
+        return null;
+      }
+      return payload.items.length;
+    } catch {
+      return null;
+    }
   }
 
   async ensureEmbeddingsForOrganization(
@@ -758,19 +777,15 @@ export class FaqEntryService {
       if (!this.reindexPending.has(scopeKey)) {
         return;
       }
+      // Always rebuild when a mutation arrived mid-flight. Do NOT gate on
+      // needsEmbeddingsRebuild: the finished job's mtime can be newer than the
+      // new FAQ's contentUpdatedAt even though that FAQ was never indexed.
       this.reindexPending.delete(scopeKey);
-      void this.needsEmbeddingsRebuild(organizationId, normalizedKey)
-        .then((stillStale) => {
-          if (!stillStale) {
-            return undefined;
-          }
-          return this.rebuildEmbeddings(organizationId, normalizedKey);
-        })
-        .catch((error) => {
-          this.logger.warn(
-            `Follow-up FAQ reindex failed for ${organizationId}/${normalizedKey}: ${(error as Error).message}`,
-          );
-        });
+      void this.rebuildEmbeddings(organizationId, normalizedKey).catch((error) => {
+        this.logger.warn(
+          `Follow-up FAQ reindex failed for ${organizationId}/${normalizedKey}: ${(error as Error).message}`,
+        );
+      });
     });
 
     this.rebuildLocks.set(scopeKey, job);

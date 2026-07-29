@@ -8,6 +8,7 @@ export const SDK_TOKEN_SCOPES = [
   'semantic:invoke',
   'faq:search',
   'ml:predict',
+  'support:write',
   'tours:publish',
 ] as const;
 
@@ -23,6 +24,7 @@ export const DEFAULT_DEVELOPER_SDK_SCOPES: SdkTokenScope[] = [
   'semantic:invoke',
   'faq:search',
   'ml:predict',
+  'support:write',
 ];
 
 /** Extra scopes only assignable when creator is ADMIN (none today — reserved for future). */

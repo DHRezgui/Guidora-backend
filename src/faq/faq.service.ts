@@ -2,8 +2,14 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SemanticSearchRequestDto, SemanticSearchResponseDto } from './dto/semantic-search.dto';
+import { SemanticSearchRequestDto, SemanticSearchResponseDto, SemanticSearchResultDto } from './dto/semantic-search.dto';
 import { FaqEntryService } from './faq-entry.service';
+import {
+	DEFAULT_FAQ_FALLBACK_MIN_SCORE,
+	applyAdaptiveFaqStrategy,
+	applyLexicalBoostToResults,
+	mergeNearExactCorpusHits,
+} from './faq-search-ranking';
 
 @Injectable()
 export class FaqService {
@@ -13,6 +19,8 @@ export class FaqService {
 	private readonly semanticScriptPath: string;
 	private readonly pythonTimeoutMs: number;
 	private readonly adaptiveThresholds: number[];
+	private readonly fallbackMinScore: number;
+	private readonly lexicalBoostEnabled: boolean;
 
 	constructor(private readonly faqEntryService: FaqEntryService) {
 		const cwd = process.cwd();
@@ -21,6 +29,10 @@ export class FaqService {
 		this.adaptiveThresholds = this.parseAdaptiveThresholds(
 			process.env.FAQ_ADAPTIVE_THRESHOLDS ?? '0.7,0.65,0.6',
 		);
+		this.fallbackMinScore = this.parseFallbackMinScore(
+			process.env.FAQ_FALLBACK_MIN_SCORE ?? String(DEFAULT_FAQ_FALLBACK_MIN_SCORE),
+		);
+		this.lexicalBoostEnabled = process.env.FAQ_LEXICAL_BOOST !== 'false';
 		this.pythonExecutable = this.resolvePythonExecutable();
 		this.semanticScriptPath = this.resolveSemanticScriptPath();
 	}
@@ -62,41 +74,80 @@ export class FaqService {
 			orgEmbeddingsPath,
 		);
 
-		if (!rawResponse.results?.length) {
+		if (!rawResponse.results?.length && !organizationId) {
 			return {
 				...rawResponse,
 				strategyStep: 'no_results',
 			};
 		}
 
-		const thresholds = this.getEffectiveThresholds(requestedMinSimilarity);
+		let candidateResults: SemanticSearchResultDto[] = [...(rawResponse.results ?? [])];
 
-		for (const threshold of thresholds) {
-			const filtered = rawResponse.results.filter((item) => item.score >= threshold).slice(0, topK);
-			if (filtered.length > 0) {
-				const strategyStep = `threshold_${threshold}`;
-				this.logger.log(
-					`FAQ adaptive strategy matched ${strategyStep} with ${filtered.length} result(s)`,
-				);
-				return {
-					success: rawResponse.success,
-					query: rawResponse.query,
-					total: filtered.length,
-					strategyStep,
-					results: filtered,
-				};
-			}
+		if (this.lexicalBoostEnabled && organizationId) {
+			const activeItems = await this.faqEntryService.listActiveForOrganization(
+				organizationId,
+				request.projectKey,
+			);
+			candidateResults = mergeNearExactCorpusHits(
+				candidateResults,
+				activeItems.map((item) => ({
+					id: item.id,
+					question: item.question,
+					answer: item.answer,
+					category: item.category,
+					priority: this.extractPriorityLabel(item.tags),
+				})),
+				request.question,
+			) as SemanticSearchResultDto[];
 		}
 
-		this.logger.log('FAQ adaptive strategy fallback: returning top-1 despite low score');
-		const fallbackResults = rawResponse.results.slice(0, 1);
+		if (!candidateResults.length) {
+			return {
+				success: true,
+				query: rawResponse.query ?? request.question,
+				total: 0,
+				strategyStep: 'no_results',
+				results: [],
+			};
+		}
+
+		const ranked: SemanticSearchResultDto[] = this.lexicalBoostEnabled
+			? applyLexicalBoostToResults(candidateResults, request.question)
+			: [...candidateResults].sort((a, b) => b.score - a.score);
+
+		const thresholds = this.getEffectiveThresholds(requestedMinSimilarity);
+		const strategy = applyAdaptiveFaqStrategy({
+			results: ranked,
+			thresholds,
+			topK,
+			fallbackMinScore: this.fallbackMinScore,
+			allowFallbackTop1: true,
+		});
+
+		this.logger.log(
+			`FAQ strategy=${strategy.strategyStep} total=${strategy.total} lexicalBoost=${this.lexicalBoostEnabled}`,
+		);
+
 		return {
-			success: rawResponse.success,
-			query: rawResponse.query,
-			total: fallbackResults.length,
-			strategyStep: 'fallback_top1',
-			results: fallbackResults,
+			success: rawResponse.success ?? true,
+			query: rawResponse.query ?? request.question,
+			total: strategy.total,
+			strategyStep: strategy.strategyStep,
+			results: strategy.results,
 		};
+	}
+
+	private extractPriorityLabel(tags?: string[] | null): string {
+		const priorityTag = (tags ?? []).find((tag) => tag.startsWith('priority:'));
+		if (!priorityTag) return 'medium';
+		const value = priorityTag.slice('priority:'.length).trim();
+		return value || 'medium';
+	}
+
+	private parseFallbackMinScore(value: string): number {
+		const num = Number(value);
+		if (!Number.isFinite(num)) return DEFAULT_FAQ_FALLBACK_MIN_SCORE;
+		return Math.max(0, Math.min(1, num));
 	}
 
 	private parseAdaptiveThresholds(value: string): number[] {
