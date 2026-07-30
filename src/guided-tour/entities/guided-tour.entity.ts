@@ -47,6 +47,10 @@ export class GuidedTour {
   @Column({ type: 'boolean', default: true, name: 'is_active' })
   isActive: boolean;
 
+  /** Opt-in admin : catalogue Aide > Guides (indépendant de l’autostart /tours/active). */
+  @Column({ type: 'boolean', default: false, name: 'show_in_guides' })
+  showInGuides: boolean;
+
   /** Visible en runtime sandbox pour les admins (parcours déjà en production). */
   @Column({ type: 'boolean', default: false, name: 'is_sandbox_test_active' })
   isSandboxTestActive: boolean;

@@ -1,22 +1,47 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
-import { Public } from '../auth/decorators/public.decorator';
 import { AsyncTrackingService } from './async-tracking.service';
 import { TrackEventDto } from './dto/track-event.dto';
 import { BatchTrackEventsDto } from './dto/batch-track-events.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireSdkScopes } from '../auth/decorators/require-sdk-scopes.decorator';
+import { ApiAuth } from '../swagger/security-schemas';
+import type { RequestAuthUser } from '../auth/types/request-auth-user.type';
 
 @ApiTags('Tracking Events')
 @Controller('tracking')
+@ApiAuth()
 export class TrackingController {
   constructor(private readonly asyncTrackingService: AsyncTrackingService) {}
 
+  private resolveOrganizationId(user: RequestAuthUser): string {
+    if (!user?.organizationId) {
+      throw new ForbiddenException('Aucune organisation associée au token SDK.');
+    }
+    return user.organizationId;
+  }
+
+  private bindOrganization(dto: TrackEventDto, organizationId: string): TrackEventDto {
+    return { ...dto, organizationId };
+  }
+
   // Asynchronous single event submission (immediate response)
-  @Public()
+  @RequireSdkScopes('tours:runtime')
   @Post('events')
   @HttpCode(HttpStatus.ACCEPTED) // 202 Accepted
   @ApiOperation({ 
     summary: 'Track an event (async)',
-    description: 'Accepts the event and processes it in the background via RabbitMQ. Immediate response (202) to avoid blocking the SDK client.'
+    description:
+      'Accepts the event and processes it in the background via RabbitMQ. ' +
+      'Requires an SDK token (td_sdk_ / td_sess_) with tours:runtime. ' +
+      'organizationId is always taken from the token (client value ignored).',
   })
   @ApiBody({ 
     type: TrackEventDto,
@@ -55,8 +80,16 @@ export class TrackingController {
       }
     }
   })
-  async trackEvent(@Body() trackEventDto: TrackEventDto) {
-    const result = await this.asyncTrackingService.trackEventAsync(trackEventDto);
+  @ApiResponse({ status: 401, description: 'Missing or invalid SDK token' })
+  @ApiResponse({ status: 403, description: 'Missing tours:runtime scope' })
+  async trackEvent(
+    @Body() trackEventDto: TrackEventDto,
+    @CurrentUser() user: RequestAuthUser,
+  ) {
+    const organizationId = this.resolveOrganizationId(user);
+    const result = await this.asyncTrackingService.trackEventAsync(
+      this.bindOrganization(trackEventDto, organizationId),
+    );
     
     return {
       success: result.accepted,
@@ -66,12 +99,14 @@ export class TrackingController {
   }
 
   // Asynchronous batch submission (immediate response)
-  @Public()
+  @RequireSdkScopes('tours:runtime')
   @Post('events/batch')
   @HttpCode(HttpStatus.ACCEPTED) // 202 Accepted
   @ApiOperation({ 
     summary: 'Track a batch of events (async)',
-    description: 'Accepts the batch and processes it in the background via RabbitMQ. Optimized for SDK performance (grouped submission).'
+    description:
+      'Accepts the batch and processes it in the background via RabbitMQ. ' +
+      'Requires an SDK token with tours:runtime. organizationId is always taken from the token.',
   })
   @ApiBody({
     type: BatchTrackEventsDto,
@@ -112,13 +147,22 @@ export class TrackingController {
       }
     }
   })
-  async trackBatch(@Body() batchDto: BatchTrackEventsDto) {
-    const result = await this.asyncTrackingService.trackBatchAsync(batchDto.events);
+  @ApiResponse({ status: 401, description: 'Missing or invalid SDK token' })
+  @ApiResponse({ status: 403, description: 'Missing tours:runtime scope' })
+  async trackBatch(
+    @Body() batchDto: BatchTrackEventsDto,
+    @CurrentUser() user: RequestAuthUser,
+  ) {
+    const organizationId = this.resolveOrganizationId(user);
+    const events = (batchDto.events || []).map((event) =>
+      this.bindOrganization(event, organizationId),
+    );
+    const result = await this.asyncTrackingService.trackBatchAsync(events);
     
     return {
       success: result.accepted,
       message: result.accepted 
-        ? `Batch accepté (${result.count}/${batchDto.events.length} événements)`
+        ? `Batch accepté (${result.count}/${events.length} événements)`
         : 'Batch rejeté (buffer plein)',
       accepted: result.accepted,
       count: result.count,

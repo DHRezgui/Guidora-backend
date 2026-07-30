@@ -19,6 +19,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { SdkScopesGuard } from './guards/sdk-scopes.guard';
 import { MailModule } from '../mail/mail.module';
+import { resolveJwtSecret } from './jwt-secret.util';
 
 @Global()
 @Module({
@@ -34,7 +35,7 @@ import { MailModule } from '../mail/mail.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') || 'your-secret-key-change-in-production',
+        secret: resolveJwtSecret(configService),
         signOptions: {
           expiresIn: '1h', 
         },

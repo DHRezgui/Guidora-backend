@@ -663,6 +663,48 @@ export class GuidedTourController {
     };
   }
 
+  // Curated Guides catalog for Aide (prod: showInGuides; sandbox: active + showInGuides)
+  @RequireSdkScopes('tours:runtime')
+  @Get('guides/url')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Guide tours for a URL',
+    description:
+      'Returns production tours flagged showInGuides for the target URL (Aide Guides). Active is not required in production. Includes completed tours for Relancer.',
+  })
+  @ApiQuery({
+    name: 'url',
+    required: true,
+    type: String,
+    description: 'The page URL to search guide tours for',
+    example: '/dashboard/transfers',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Guide tours found for this URL',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Access denied - You do not have the required permissions',
+  })
+  async findGuidesForUrl(
+    @Query('url') url: string,
+    @CurrentUser() user: any,
+  ) {
+    const organizationId = this.getOrganizationId(user);
+    const tours = await this.tourService.findGuideToursForUrl(url, organizationId, user?.id, {
+      userId: user?.id,
+      userRole: user?.role,
+      authMethod: user?.authMethod,
+      scopes: user?.scopes,
+    });
+    return {
+      success: true,
+      count: tours.length,
+      tours,
+    };
+  }
+
   @RequireSdkScopes('tours:runtime')
   @Post(':id/dismiss')
   @HttpCode(HttpStatus.OK)

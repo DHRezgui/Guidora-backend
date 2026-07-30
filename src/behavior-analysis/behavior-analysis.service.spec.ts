@@ -271,8 +271,8 @@ describe('BehaviorAnalysisService', () => {
       const result = await service.getTimeSeriesData('org-uuid-1');
 
       expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('30 days'),
-        ['org-uuid-1'],
+        expect.stringContaining("INTERVAL '1 day'"),
+        ['org-uuid-1', 30],
       );
       expect(result).toEqual(mockData);
     });
@@ -283,8 +283,8 @@ describe('BehaviorAnalysisService', () => {
       await service.getTimeSeriesData('org-uuid-1', 7);
 
       expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('7 days'),
-        ['org-uuid-1'],
+        expect.stringContaining("INTERVAL '1 day'"),
+        ['org-uuid-1', 7],
       );
     });
   });

@@ -113,9 +113,13 @@ export class TrackingService {
   }
 
   // Trouver les événements par session
-  async findEventsBySession(sessionId: string, limit: number = 100): Promise<BehaviorEvent[]> {
+  async findEventsBySession(
+    sessionId: string,
+    limit: number = 100,
+    organizationId?: string,
+  ): Promise<BehaviorEvent[]> {
     return this.eventRepository.find({
-      where: { sessionId },
+      where: organizationId ? { sessionId, organizationId } : { sessionId },
       order: { timestamp: 'DESC' },
       take: limit,
     });
@@ -161,8 +165,8 @@ export class TrackingService {
   }
 
   // Analyser les frictions dans une session
-  async analyzeSessionFrictions(sessionId: string): Promise<any> {
-    const events = await this.findEventsBySession(sessionId, 1000);
+  async analyzeSessionFrictions(sessionId: string, organizationId?: string): Promise<any> {
+    const events = await this.findEventsBySession(sessionId, 1000, organizationId);
     
     const frictions = {
       clickMisses: 0,

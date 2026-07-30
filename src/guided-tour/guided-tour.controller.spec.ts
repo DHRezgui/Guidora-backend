@@ -16,6 +16,7 @@ describe('GuidedTourController', () => {
     publishContextualDrafts: jest.fn(),
     findAllByOrganization: jest.fn(),
     findActiveToursForUrl: jest.fn(),
+    findGuideToursForUrl: jest.fn(),
     findById: jest.fn(),
     update: jest.fn(),
     toggleActive: jest.fn(),
@@ -327,6 +328,31 @@ describe('GuidedTourController', () => {
         count: 0,
         tours: [],
       });
+    });
+  });
+
+  describe('findGuidesForUrl', () => {
+    it('should return curated guide tours for a given URL', async () => {
+      mockGuidedTourService.findGuideToursForUrl.mockResolvedValue([mockTourResponse]);
+
+      const result = await controller.findGuidesForUrl('/dashboard/transfers', mockCurrentUser);
+
+      expect(result).toEqual({
+        success: true,
+        count: 1,
+        tours: [mockTourResponse],
+      });
+      expect(service.findGuideToursForUrl).toHaveBeenCalledWith(
+        '/dashboard/transfers',
+        mockCurrentUser.organizationId,
+        mockCurrentUser.id,
+        {
+          userId: mockCurrentUser.id,
+          userRole: mockCurrentUser.role,
+          authMethod: mockCurrentUser.authMethod,
+          scopes: mockCurrentUser.scopes,
+        },
+      );
     });
   });
 

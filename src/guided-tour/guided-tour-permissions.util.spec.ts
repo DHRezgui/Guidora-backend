@@ -1,6 +1,10 @@
+import { ForbiddenException } from '@nestjs/common';
 import { TourEnvironment, TourSandboxStatus } from './entities/guided-tour.entity';
 import { UserRole } from '../user/entities/user.entity';
-import { resolveCreateTourEnvironment } from './guided-tour-permissions.util';
+import {
+  resolveCreateTourEnvironment,
+  resolveShowInGuidesForWrite,
+} from './guided-tour-permissions.util';
 
 describe('guided-tour-permissions.util', () => {
   describe('resolveCreateTourEnvironment', () => {
@@ -45,6 +49,32 @@ describe('guided-tour-permissions.util', () => {
           sandboxStatus: TourSandboxStatus.PENDING,
         });
       }
+    });
+  });
+
+  describe('resolveShowInGuidesForWrite', () => {
+    it('allows admin to set true or false', () => {
+      expect(
+        resolveShowInGuidesForWrite(true, { id: 'admin-1', role: UserRole.ADMIN }),
+      ).toBe(true);
+      expect(
+        resolveShowInGuidesForWrite(false, { id: 'admin-1', role: UserRole.ADMIN }),
+      ).toBe(false);
+    });
+
+    it('allows developer to set false or omit', () => {
+      expect(
+        resolveShowInGuidesForWrite(false, { id: 'dev-1', role: UserRole.DEVELOPER }),
+      ).toBe(false);
+      expect(
+        resolveShowInGuidesForWrite(undefined, { id: 'dev-1', role: UserRole.DEVELOPER }),
+      ).toBeUndefined();
+    });
+
+    it('rejects developer enabling Guides', () => {
+      expect(() =>
+        resolveShowInGuidesForWrite(true, { id: 'dev-1', role: UserRole.DEVELOPER }),
+      ).toThrow(ForbiddenException);
     });
   });
 });

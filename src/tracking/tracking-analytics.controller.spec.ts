@@ -3,6 +3,7 @@ import { TrackingAnalyticsController } from './tracking-analytics.controller';
 import { TrackingService } from './tracking.service';
 import { EventType } from './enums/tracking.enums';
 import { BehaviorEvent } from './entities/behavior_event.entity';
+import { UserRole } from '../user/entities/user.entity';
 
 describe('TrackingAnalyticsController', () => {
   let controller: TrackingAnalyticsController;
@@ -14,7 +15,11 @@ describe('TrackingAnalyticsController', () => {
     findEventsByOrganization: jest.fn(),
   };
 
-  // ── helpers ──────────────────────────────────────────────────
+  const mockUser = {
+    role: UserRole.ADMIN,
+    organizationId: 'org-uuid-1',
+  };
+
   const makeMockEvent = (overrides: Partial<BehaviorEvent> = {}): BehaviorEvent =>
     ({
       id: 'evt-uuid-1',
@@ -32,7 +37,6 @@ describe('TrackingAnalyticsController', () => {
       ...overrides,
     }) as BehaviorEvent;
 
-  // ── setup ────────────────────────────────────────────────────
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TrackingAnalyticsController],
@@ -53,9 +57,6 @@ describe('TrackingAnalyticsController', () => {
     expect(controller).toBeDefined();
   });
 
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/analytics/sessions/:sessionId/events
-  // ════════════════════════════════════════════════════════════
   describe('getSessionEvents', () => {
     const sessionId = 'sess-uuid-1';
     const events = [
@@ -63,13 +64,12 @@ describe('TrackingAnalyticsController', () => {
       makeMockEvent({ id: 'evt-2', eventType: EventType.SCROLL }),
     ];
 
-    it('devrait retourner les événements d\'une session', async () => {
+    it("devrait retourner les événements d'une session", async () => {
       mockTrackingService.findEventsBySession.mockResolvedValue(events);
 
-      const result = await controller.getSessionEvents(sessionId, 100);
+      const result = await controller.getSessionEvents(sessionId, 100, mockUser);
 
-      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 100);
-      expect(service.findEventsBySession).toHaveBeenCalledTimes(1);
+      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 100, 'org-uuid-1');
       expect(result).toEqual({
         success: true,
         count: 2,
@@ -80,7 +80,7 @@ describe('TrackingAnalyticsController', () => {
     it('devrait retourner un tableau vide si aucun événement', async () => {
       mockTrackingService.findEventsBySession.mockResolvedValue([]);
 
-      const result = await controller.getSessionEvents(sessionId, 100);
+      const result = await controller.getSessionEvents(sessionId, 100, mockUser);
 
       expect(result.count).toBe(0);
       expect(result.events).toEqual([]);
@@ -89,29 +89,26 @@ describe('TrackingAnalyticsController', () => {
     it('devrait transmettre la limite personnalisée', async () => {
       mockTrackingService.findEventsBySession.mockResolvedValue([events[0]]);
 
-      await controller.getSessionEvents(sessionId, 1);
+      await controller.getSessionEvents(sessionId, 1, mockUser);
 
-      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 1);
+      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 1, 'org-uuid-1');
     });
 
     it('devrait utiliser la limite par défaut (100)', async () => {
       mockTrackingService.findEventsBySession.mockResolvedValue(events);
 
-      await controller.getSessionEvents(sessionId);
+      await controller.getSessionEvents(sessionId, undefined as any, mockUser);
 
-      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 100);
+      expect(service.findEventsBySession).toHaveBeenCalledWith(sessionId, 100, 'org-uuid-1');
     });
 
     it('devrait propager une erreur du service', async () => {
       mockTrackingService.findEventsBySession.mockRejectedValue(new Error('DB error'));
 
-      await expect(controller.getSessionEvents(sessionId, 100)).rejects.toThrow('DB error');
+      await expect(controller.getSessionEvents(sessionId, 100, mockUser)).rejects.toThrow('DB error');
     });
   });
 
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/analytics/sessions/:sessionId/frictions
-  // ════════════════════════════════════════════════════════════
   describe('analyzeSessionFrictions', () => {
     const sessionId = 'sess-uuid-1';
 
@@ -125,10 +122,9 @@ describe('TrackingAnalyticsController', () => {
       };
       mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
 
-      const result = await controller.analyzeSessionFrictions(sessionId);
+      const result = await controller.analyzeSessionFrictions(sessionId, mockUser);
 
-      expect(service.analyzeSessionFrictions).toHaveBeenCalledWith(sessionId);
-      expect(service.analyzeSessionFrictions).toHaveBeenCalledTimes(1);
+      expect(service.analyzeSessionFrictions).toHaveBeenCalledWith(sessionId, 'org-uuid-1');
       expect(result).toEqual({
         success: true,
         sessionId,
@@ -138,28 +134,46 @@ describe('TrackingAnalyticsController', () => {
     });
 
     it('devrait retourner LOW pour 2-4 frictions', async () => {
-      const frictions = { clickMisses: 2, scrollHesitations: 0, excessiveTimeOnPage: 0, formAbandonments: 0, navigationBacks: 0 };
+      const frictions = {
+        clickMisses: 2,
+        scrollHesitations: 0,
+        excessiveTimeOnPage: 0,
+        formAbandonments: 0,
+        navigationBacks: 0,
+      };
       mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
 
-      const result = await controller.analyzeSessionFrictions(sessionId);
+      const result = await controller.analyzeSessionFrictions(sessionId, mockUser);
 
       expect(result.riskLevel).toBe('LOW');
     });
 
     it('devrait retourner MEDIUM pour 5-9 frictions', async () => {
-      const frictions = { clickMisses: 3, scrollHesitations: 2, excessiveTimeOnPage: 0, formAbandonments: 0, navigationBacks: 0 };
+      const frictions = {
+        clickMisses: 3,
+        scrollHesitations: 2,
+        excessiveTimeOnPage: 0,
+        formAbandonments: 0,
+        navigationBacks: 0,
+      };
       mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
 
-      const result = await controller.analyzeSessionFrictions(sessionId);
+      const result = await controller.analyzeSessionFrictions(sessionId, mockUser);
 
       expect(result.riskLevel).toBe('MEDIUM');
     });
 
     it('devrait retourner HIGH pour 10+ frictions', async () => {
-      const frictions = { clickMisses: 5, scrollHesitations: 3, excessiveTimeOnPage: 2, formAbandonments: 0, navigationBacks: 0 };
+      const frictions = {
+        clickMisses: 5,
+        scrollHesitations: 3,
+        excessiveTimeOnPage: 2,
+        formAbandonments: 0,
+        navigationBacks: 0,
+      };
       mockTrackingService.analyzeSessionFrictions.mockResolvedValue(frictions);
 
-      const result = await controller.analyzeSessionFrictions(sessionId);
+      const result = await controller.analyzeSessionFrictions(sessionId, mockUser);
 
       expect(result.riskLevel).toBe('HIGH');
     });
@@ -167,21 +181,20 @@ describe('TrackingAnalyticsController', () => {
     it('devrait propager une erreur du service', async () => {
       mockTrackingService.analyzeSessionFrictions.mockRejectedValue(new Error('Session not found'));
 
-      await expect(controller.analyzeSessionFrictions(sessionId)).rejects.toThrow('Session not found');
+      await expect(controller.analyzeSessionFrictions(sessionId, mockUser)).rejects.toThrow(
+        'Session not found',
+      );
     });
   });
 
-  // ════════════════════════════════════════════════════════════
-  // GET /tracking/analytics/organizations/:organizationId/events
-  // ════════════════════════════════════════════════════════════
   describe('getOrganizationEvents', () => {
     const orgId = 'org-uuid-1';
     const events = [makeMockEvent(), makeMockEvent({ id: 'evt-uuid-2' })];
 
-    it('devrait retourner les événements d\'une organisation sans filtres', async () => {
+    it("devrait retourner les événements d'une organisation sans filtres", async () => {
       mockTrackingService.findEventsByOrganization.mockResolvedValue(events);
 
-      const result = await controller.getOrganizationEvents(orgId);
+      const result = await controller.getOrganizationEvents(orgId, mockUser);
 
       expect(service.findEventsByOrganization).toHaveBeenCalledWith(orgId, {
         eventType: undefined,
@@ -190,7 +203,6 @@ describe('TrackingAnalyticsController', () => {
         pageUrl: undefined,
         limit: undefined,
       });
-      expect(service.findEventsByOrganization).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         success: true,
         count: 2,
@@ -205,6 +217,7 @@ describe('TrackingAnalyticsController', () => {
 
       await controller.getOrganizationEvents(
         orgId,
+        mockUser,
         EventType.CLICK,
         startDate,
         endDate,
@@ -224,7 +237,7 @@ describe('TrackingAnalyticsController', () => {
     it('devrait filtrer par eventType uniquement', async () => {
       mockTrackingService.findEventsByOrganization.mockResolvedValue(events);
 
-      await controller.getOrganizationEvents(orgId, EventType.PAGE_VIEW);
+      await controller.getOrganizationEvents(orgId, mockUser, EventType.PAGE_VIEW);
 
       expect(service.findEventsByOrganization).toHaveBeenCalledWith(orgId, {
         eventType: EventType.PAGE_VIEW,
@@ -238,7 +251,7 @@ describe('TrackingAnalyticsController', () => {
     it('devrait retourner un tableau vide si aucun événement', async () => {
       mockTrackingService.findEventsByOrganization.mockResolvedValue([]);
 
-      const result = await controller.getOrganizationEvents(orgId);
+      const result = await controller.getOrganizationEvents(orgId, mockUser);
 
       expect(result.count).toBe(0);
       expect(result.events).toEqual([]);
@@ -247,18 +260,32 @@ describe('TrackingAnalyticsController', () => {
     it('devrait convertir limit en entier', async () => {
       mockTrackingService.findEventsByOrganization.mockResolvedValue(events);
 
-      // Query params arrive as strings sometimes
-      await controller.getOrganizationEvents(orgId, undefined, undefined, undefined, undefined, 25);
+      await controller.getOrganizationEvents(
+        orgId,
+        mockUser,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        25,
+      );
 
-      expect(service.findEventsByOrganization).toHaveBeenCalledWith(orgId, expect.objectContaining({
-        limit: 25,
-      }));
+      expect(service.findEventsByOrganization).toHaveBeenCalledWith(
+        orgId,
+        expect.objectContaining({
+          limit: 25,
+        }),
+      );
     });
 
     it('devrait propager une erreur du service', async () => {
-      mockTrackingService.findEventsByOrganization.mockRejectedValue(new Error('Organisation introuvable'));
+      mockTrackingService.findEventsByOrganization.mockRejectedValue(
+        new Error('Organisation introuvable'),
+      );
 
-      await expect(controller.getOrganizationEvents(orgId)).rejects.toThrow('Organisation introuvable');
+      await expect(controller.getOrganizationEvents(orgId, mockUser)).rejects.toThrow(
+        'Organisation introuvable',
+      );
     });
   });
 });

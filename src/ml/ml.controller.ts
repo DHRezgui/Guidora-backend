@@ -2,6 +2,7 @@ import { Controller, Get, Param, HttpCode, HttpStatus, Post, UseGuards, Body } f
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { AllowDashboardJwtOnSdkRoute } from '../auth/decorators/allow-dashboard-jwt-on-sdk-route.decorator';
 import { AllowSdkScopes } from '../auth/decorators/allow-sdk-scopes.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireSdkScopes } from '../auth/decorators/require-sdk-scopes.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -10,6 +11,7 @@ import { DatasetGeneratorService } from './dataset-generator.service';
 import { PredictionService } from './prediction.service';
 import { ApiAuth } from '../swagger/security-schemas';
 import { BehaviorAnalysisService } from '../behavior-analysis/behavior-analysis.service';
+import { assertOrganizationScopedAccess } from '../common/membership-roles.util';
 import {
   BatchPredictionRequestDto,
   BatchPredictionResponseDto,
@@ -17,6 +19,8 @@ import {
   PredictionResponseDto,
   ModelHealthDto,
 } from './dto/prediction.dto';
+
+type OrgScopedUser = { role?: UserRole; organizationId?: string | null };
 
 @ApiTags('Machine Learning')
 @Controller('ml')
@@ -74,7 +78,11 @@ export class MlController {
       },
     },
   })
-  async generateDataset(@Param('organizationId') organizationId: string) {
+  async generateDataset(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: OrgScopedUser,
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const dataset = await this.datasetService.generateDataset(organizationId);
     return {
       success: true,
@@ -120,7 +128,11 @@ export class MlController {
       },
     },
   })
-  async exportDatasetCSV(@Param('organizationId') organizationId: string) {
+  async exportDatasetCSV(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: OrgScopedUser,
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const csvData = await this.datasetService.exportDatasetCSV(organizationId);
     
     return {
@@ -168,7 +180,11 @@ export class MlController {
       },
     },
   })
-  async exportDatasetJSON(@Param('organizationId') organizationId: string) {
+  async exportDatasetJSON(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: OrgScopedUser,
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const jsonData = await this.datasetService.exportDatasetJSON(organizationId);
     
     return {
@@ -224,7 +240,11 @@ export class MlController {
       },
     },
   })
-  async getDatasetStats(@Param('organizationId') organizationId: string) {
+  async getDatasetStats(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: OrgScopedUser,
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const quality = await this.datasetService.getDatasetQualityReport(organizationId);
     
     return {
@@ -298,7 +318,11 @@ export class MlController {
       },
     },
   })
-  async refreshDatasetSource(@Param('organizationId') organizationId: string) {
+  async refreshDatasetSource(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: OrgScopedUser,
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const processedSessions = await this.behaviorAnalysisService.analyzeOrganizationSessions(organizationId);
     const quality = await this.datasetService.getDatasetQualityReport(organizationId);
 

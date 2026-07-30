@@ -2,9 +2,11 @@ import { Controller, Get, Post, HttpCode, HttpStatus, UseGuards, Param, Query } 
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../user/entities/user.entity';
 import { BehaviorAnalysisService } from './behavior-analysis.service';
 import { ApiAuth } from '../swagger/security-schemas';
+import { assertOrganizationScopedAccess } from '../common/membership-roles.util';
 
 @ApiTags('Behavior Analysis')
 @Controller('analysis')
@@ -39,7 +41,12 @@ export class BehaviorAnalysisController {
       }
     }
   })
-  async analyzeSession(@Param('sessionId') sessionId: string, @Query('organizationId') organizationId: string) {
+  async analyzeSession(
+    @Param('sessionId') sessionId: string,
+    @Query('organizationId') organizationId: string,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const analysis = await this.analysisService.analyzeSession(sessionId, organizationId);
     return {
       success: true,
@@ -68,7 +75,11 @@ export class BehaviorAnalysisController {
       }
     }
   })
-  async analyzeOrganization(@Param('organizationId') organizationId: string) {
+  async analyzeOrganization(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const processed = await this.analysisService.analyzeOrganizationSessions(organizationId);
     return {
       success: true,
@@ -106,7 +117,11 @@ export class BehaviorAnalysisController {
       }
     }
   })
-  async getOrganizationStats(@Param('organizationId') organizationId: string) {
+  async getOrganizationStats(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const stats = await this.analysisService.getOrganizationStats(organizationId);
     return {
       success: true,
@@ -125,7 +140,12 @@ export class BehaviorAnalysisController {
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   @ApiQuery({ name: 'days', required: false, type: Number, example: 30 })
   @ApiResponse({ status: 200, description: 'Trends retrieved' })
-  async getTimeSeries(@Param('organizationId') organizationId: string, @Query('days') days: number = 30) {
+  async getTimeSeries(
+    @Param('organizationId') organizationId: string,
+    @Query('days') days: number = 30,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const data = await this.analysisService.getTimeSeriesData(organizationId, days);
     return {
       success: true,
@@ -144,7 +164,11 @@ export class BehaviorAnalysisController {
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Dataset prepared' })
-  async getMLDataset(@Param('organizationId') organizationId: string) {
+  async getMLDataset(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const dataset = await this.analysisService.prepareMLDataset(organizationId);
     return {
       success: true,
@@ -162,7 +186,11 @@ export class BehaviorAnalysisController {
     description: 'Exports ML data in CSV format for external training'
   })
   @ApiParam({ name: 'organizationId', type: String, format: 'uuid' })
-  async exportMLData(@Param('organizationId') organizationId: string) {
+  async exportMLData(
+    @Param('organizationId') organizationId: string,
+    @CurrentUser() user: { role?: UserRole; organizationId?: string | null },
+  ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const csvData = await this.analysisService.exportMLData(organizationId);
     
     return {

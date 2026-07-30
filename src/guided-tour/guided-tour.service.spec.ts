@@ -654,6 +654,106 @@ describe('GuidedTourService', () => {
       expect(result.sandboxStatus).toBe(TourSandboxStatus.APPROVED);
     });
 
+    it('should reject DEVELOPER enabling showInGuides', async () => {
+      const sandboxTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        createdBy: userId,
+        steps: [mockStepEntity],
+      };
+      mockTourRepository.findOne.mockResolvedValue(sandboxTour);
+
+      await expect(
+        service.update(
+          'tour-uuid-1234',
+          { showInGuides: true },
+          orgId,
+          { ...developerActor, id: userId },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow ADMIN to toggle showInGuides', async () => {
+      const prodTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.PRODUCTION,
+        showInGuides: false,
+        steps: [mockStepEntity],
+      };
+      const updated = { ...prodTour, showInGuides: true };
+      mockTourRepository.findOne
+        .mockResolvedValueOnce(prodTour)
+        .mockResolvedValueOnce(updated);
+      mockTourRepository.save.mockResolvedValue(updated);
+
+      const result = await service.update(
+        'tour-uuid-1234',
+        { showInGuides: true },
+        orgId,
+        adminActor,
+      );
+
+      expect(result.showInGuides).toBe(true);
+    });
+
+    it('should clear showInGuides when admin transfers production ↔ sandbox', async () => {
+      mockAccessGrantRepository.createQueryBuilder = jest.fn().mockReturnValue({
+        delete: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue(undefined),
+      });
+      mockTourRepository.update = jest.fn().mockResolvedValue(undefined);
+
+      const prodGuideTour = {
+        ...mockTourEntity,
+        environment: TourEnvironment.PRODUCTION,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        isActive: true,
+        showInGuides: true,
+        createdBy: userId,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue({ ...prodGuideTour });
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      const toSandbox = await service.update(
+        'tour-uuid-1234',
+        { environment: TourEnvironment.SANDBOX },
+        orgId,
+        adminActor,
+      );
+
+      expect(toSandbox.environment).toBe(TourEnvironment.SANDBOX);
+      expect(toSandbox.isActive).toBe(false);
+      expect(toSandbox.showInGuides).toBe(false);
+
+      const sandboxApproved = {
+        ...mockTourEntity,
+        environment: TourEnvironment.SANDBOX,
+        sandboxStatus: TourSandboxStatus.APPROVED,
+        isActive: true,
+        showInGuides: true,
+        createdBy: userId,
+        steps: [mockStepEntity],
+      };
+
+      mockTourRepository.findOne.mockResolvedValue({ ...sandboxApproved });
+      mockTourRepository.save.mockImplementation(async (tour) => tour);
+
+      const toProduction = await service.update(
+        'tour-uuid-1234',
+        { environment: TourEnvironment.PRODUCTION },
+        orgId,
+        adminActor,
+      );
+
+      expect(toProduction.environment).toBe(TourEnvironment.PRODUCTION);
+      expect(toProduction.isActive).toBe(false);
+      expect(toProduction.showInGuides).toBe(false);
+    });
+
     it('should reject admin promotion to production while sandbox tour is rejected', async () => {
       const rejectedTour = {
         ...mockTourEntity,
@@ -837,6 +937,7 @@ describe('GuidedTourService', () => {
   describe('findActiveToursForUrl', () => {
     const buildQueryBuilder = (tours: typeof mockTourEntity[]) => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -864,6 +965,7 @@ describe('GuidedTourService', () => {
       mockTourRepository.createQueryBuilder
         .mockReturnValueOnce(buildQueryBuilder([mockTourEntity]))
         .mockReturnValueOnce(buildQueryBuilder([sandboxTour]))
+        .mockReturnValueOnce(buildQueryBuilder([]))
         .mockReturnValueOnce(buildQueryBuilder([]));
 
       const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId, userId, {
@@ -873,7 +975,7 @@ describe('GuidedTourService', () => {
       });
 
       expect(result).toEqual([mockTourEntity, sandboxTour]);
-      expect(mockTourRepository.createQueryBuilder).toHaveBeenCalledTimes(3);
+      expect(mockTourRepository.createQueryBuilder).toHaveBeenCalledTimes(4);
     });
 
     it('should not include sandbox tours without sandbox runtime permission', async () => {
@@ -903,6 +1005,7 @@ describe('GuidedTourService', () => {
       mockTourRepository.createQueryBuilder
         .mockReturnValueOnce(buildQueryBuilder([mockTourEntity]))
         .mockReturnValueOnce(buildQueryBuilder([]))
+        .mockReturnValueOnce(buildQueryBuilder([]))
         .mockReturnValueOnce(buildQueryBuilder([approvedTourSandboxTest]));
 
       const result = await service.findActiveToursForUrl('/dashboard/transfers', orgId, userId, {
@@ -912,6 +1015,94 @@ describe('GuidedTourService', () => {
       });
 
       expect(result).toEqual([mockTourEntity]);
+    });
+  });
+
+  describe('findGuideToursForUrl', () => {
+    const buildQueryBuilder = (tours: typeof mockTourEntity[]) => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(tours),
+    });
+
+    it('should return only showInGuides production tours', async () => {
+      const guideTour = { ...mockTourEntity, showInGuides: true };
+      const qb = buildQueryBuilder([guideTour]);
+      mockTourRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findGuideToursForUrl('/dashboard/transfers', orgId);
+
+      expect(result).toEqual([guideTour]);
+      expect(qb.andWhere).toHaveBeenCalledWith('tour.show_in_guides = :showInGuides', {
+        showInGuides: true,
+      });
+      expect(qb.andWhere).not.toHaveBeenCalledWith('tour.is_active = :isActive', { isActive: true });
+    });
+
+    it('should include inactive production guides flagged showInGuides', async () => {
+      const inactiveGuide = {
+        ...mockTourEntity,
+        id: 'inactive-guide',
+        showInGuides: true,
+        isActive: false,
+        priority: 8,
+      };
+      mockTourRepository.createQueryBuilder.mockReturnValue(buildQueryBuilder([inactiveGuide]));
+
+      const result = await service.findGuideToursForUrl('/dashboard/transfers', orgId);
+
+      expect(result).toEqual([inactiveGuide]);
+    });
+
+    it('should not exclude completed tours from the guides catalog', async () => {
+      const guideTour = { ...mockTourEntity, id: 'guide-1', showInGuides: true, priority: 5 };
+      mockTourRepository.createQueryBuilder.mockReturnValue(buildQueryBuilder([guideTour]));
+      mockTourUserStateRepository.find.mockResolvedValue([
+        {
+          tourId: 'guide-1',
+          userId,
+          organizationId: orgId,
+          status: 'COMPLETED',
+        },
+      ]);
+
+      const result = await service.findGuideToursForUrl('/dashboard/transfers', orgId, userId, {
+        userId,
+        userRole: UserRole.USER,
+        authMethod: 'jwt',
+      });
+
+      expect(result).toEqual([guideTour]);
+      expect(mockTourUserStateRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('should include sandbox-test production guides when sandbox runtime is allowed', async () => {
+      const prodGuide = { ...mockTourEntity, id: 'prod-guide', showInGuides: true, priority: 1 };
+      const sandboxTestGuide = {
+        ...mockTourEntity,
+        id: 'sandbox-test-guide',
+        showInGuides: true,
+        isActive: true,
+        isSandboxTestActive: true,
+        priority: 20,
+      };
+
+      mockTourRepository.createQueryBuilder
+        .mockReturnValueOnce(buildQueryBuilder([prodGuide]))
+        .mockReturnValueOnce(buildQueryBuilder([]))
+        .mockReturnValueOnce(buildQueryBuilder([]))
+        .mockReturnValueOnce(buildQueryBuilder([sandboxTestGuide]));
+
+      const result = await service.findGuideToursForUrl('/dashboard/transfers', orgId, userId, {
+        userId,
+        userRole: UserRole.DEVELOPER,
+        authMethod: 'jwt',
+      });
+
+      expect(result.map((t) => t.id)).toEqual(['sandbox-test-guide', 'prod-guide']);
     });
   });
 

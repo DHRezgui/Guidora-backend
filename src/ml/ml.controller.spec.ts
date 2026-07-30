@@ -62,7 +62,10 @@ describe('MlController', () => {
       featuresPerSample: 12,
     });
 
-    const result = await controller.getDatasetStats('org-1');
+    const result = await controller.getDatasetStats('org-1', {
+      role: 'ADMIN' as any,
+      organizationId: 'org-1',
+    });
 
     expect(result.success).toBe(true);
     expect(result.stats.totalSamples).toBe(120);
@@ -78,7 +81,10 @@ describe('MlController', () => {
       totalSamples: 200,
     });
 
-    const result = await controller.refreshDatasetSource('org-1');
+    const result = await controller.refreshDatasetSource('org-1', {
+      role: 'ADMIN' as any,
+      organizationId: 'org-1',
+    });
 
     expect(result.success).toBe(true);
     expect(result.processedSessions).toBe(18);

@@ -1,16 +1,32 @@
-import { Controller, Get, HttpCode, HttpStatus, Query, Param } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Query, Param, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../user/entities/user.entity';
 import { TrackingService } from './tracking.service';
 import { EventType } from './enums/tracking.enums';
 import { ApiAuth } from '../swagger/security-schemas';
+import {
+  assertOrganizationScopedAccess,
+  isSuperAdmin,
+} from '../common/membership-roles.util';
+
+type AnalyticsUser = { role?: UserRole; organizationId?: string | null };
 
 @ApiTags('Analytics Tracking')
 @Controller('tracking/analytics')
 export class TrackingAnalyticsController {
   constructor(private readonly trackingService: TrackingService) {}
 
+  private resolveSessionOrganizationFilter(user: AnalyticsUser): string | undefined {
+    if (isSuperAdmin(user.role)) {
+      return undefined;
+    }
+    if (!user.organizationId) {
+      throw new ForbiddenException('Aucune organisation associée à cet utilisateur.');
+    }
+    return user.organizationId;
+  }
 
   // Retrieve events of a session (ADMIN/DEVELOPER)
   @Roles(UserRole.ADMIN, UserRole.DEVELOPER)
@@ -26,42 +42,22 @@ export class TrackingAnalyticsController {
   @ApiResponse({
     status: 200,
     description: 'Events retrieved successfully',
-    schema: {
-      example: {
-        success: true,
-        count: 5,
-        events: [
-          {
-            id: 'evt-uuid-1',
-            sessionId: 'sess-uuid',
-            organizationId: 'org-uuid',
-            eventType: 'CLICK',
-            pageUrl: '/dashboard/transfers',
-            elementSelector: '#transfer-button',
-            timeOnPage: 30,
-            metadata: {},
-            timestamp: '2026-02-15T10:30:00.000Z'
-          }
-        ]
-      }
-    }
   })
   @ApiResponse({
     status: 403,
     description: 'Access denied - insufficient role',
-    schema: {
-      example: {
-        message: 'Forbidden resource',
-        error: 'Forbidden',
-        statusCode: 403
-      }
-    }
   })
   async getSessionEvents(
     @Param('sessionId') sessionId: string,
     @Query('limit') limit: number = 100,
+    @CurrentUser() user: AnalyticsUser,
   ) {
-    const events = await this.trackingService.findEventsBySession(sessionId, limit);
+    const organizationId = this.resolveSessionOrganizationFilter(user);
+    const events = await this.trackingService.findEventsBySession(
+      sessionId,
+      limit,
+      organizationId,
+    );
     return {
       success: true,
       count: events.length,
@@ -82,34 +78,20 @@ export class TrackingAnalyticsController {
   @ApiResponse({
     status: 200,
     description: 'Friction analysis completed',
-    schema: {
-      example: {
-        success: true,
-        sessionId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        frictions: {
-          clickMisses: 2,
-          scrollHesitations: 1,
-          excessiveTimeOnPage: 0,
-          formAbandonments: 0,
-          navigationBacks: 0
-        },
-        riskLevel: 'LOW'
-      }
-    }
   })
   @ApiResponse({
     status: 403,
     description: 'Access denied - insufficient role',
-    schema: {
-      example: {
-        message: 'Forbidden resource',
-        error: 'Forbidden',
-        statusCode: 403
-      }
-    }
   })
-  async analyzeSessionFrictions(@Param('sessionId') sessionId: string) {
-    const frictions = await this.trackingService.analyzeSessionFrictions(sessionId);
+  async analyzeSessionFrictions(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AnalyticsUser,
+  ) {
+    const organizationId = this.resolveSessionOrganizationFilter(user);
+    const frictions = await this.trackingService.analyzeSessionFrictions(
+      sessionId,
+      organizationId,
+    );
     return {
       success: true,
       sessionId,
@@ -136,57 +118,25 @@ export class TrackingAnalyticsController {
   @ApiResponse({
     status: 200,
     description: 'Events retrieved successfully',
-    schema: {
-      example: {
-        success: true,
-        count: 10,
-        events: [
-          {
-            id: 'evt-uuid-1',
-            sessionId: 'sess-uuid',
-            organizationId: 'org-uuid',
-            eventType: 'CLICK',
-            pageUrl: '/dashboard/transfers',
-            elementSelector: '#transfer-button',
-            elementText: 'Transfer',
-            timeOnPage: 30,
-            metadata: {},
-            timestamp: '2026-02-15T10:30:00.000Z'
-          }
-        ]
-      }
-    }
   })
   @ApiResponse({
     status: 403,
     description: 'Access denied - insufficient role',
-    schema: {
-      example: {
-        message: 'Forbidden resource',
-        error: 'Forbidden',
-        statusCode: 403
-      }
-    }
   })
   @ApiResponse({
     status: 404,
     description: 'Organization not found',
-    schema: {
-      example: {
-        message: 'Organization not found',
-        error: 'Not Found',
-        statusCode: 404
-      }
-    }
   })
   async getOrganizationEvents(
     @Param('organizationId') organizationId: string,
+    @CurrentUser() user: AnalyticsUser,
     @Query('eventType') eventType?: EventType,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('pageUrl') pageUrl?: string,
     @Query('limit') limit?: number,
   ) {
+    assertOrganizationScopedAccess(user, organizationId);
     const events = await this.trackingService.findEventsByOrganization(organizationId, {
       eventType,
       startDate: startDate ? new Date(startDate) : undefined,

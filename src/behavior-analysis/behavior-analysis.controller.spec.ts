@@ -2,10 +2,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BehaviorAnalysisController } from './behavior-analysis.controller';
 import { BehaviorAnalysisService } from './behavior-analysis.service';
 import { BehaviorAnalysis } from './entities/behavior-analysis.entity';
+import { UserRole } from '../user/entities/user.entity';
 
 describe('BehaviorAnalysisController', () => {
   let controller: BehaviorAnalysisController;
   let service: BehaviorAnalysisService;
+
+  const mockUser = {
+    id: 'user-uuid-1',
+    role: UserRole.ADMIN,
+    organizationId: 'org-uuid-1',
+  };
 
   const mockAnalysisService = {
     analyzeSession: jest.fn(),
@@ -54,7 +61,7 @@ describe('BehaviorAnalysisController', () => {
     it('should analyze a session and return success', async () => {
       mockAnalysisService.analyzeSession.mockResolvedValue(mockAnalysis);
 
-      const result = await controller.analyzeSession('sess-uuid-1', 'org-uuid-1');
+      const result = await controller.analyzeSession('sess-uuid-1', 'org-uuid-1', mockUser);
 
       expect(result).toEqual({
         success: true,
@@ -69,7 +76,7 @@ describe('BehaviorAnalysisController', () => {
         new Error('Aucun événement trouvé pour la session sess-none'),
       );
 
-      await expect(controller.analyzeSession('sess-none', 'org-uuid-1')).rejects.toThrow(
+      await expect(controller.analyzeSession('sess-none', 'org-uuid-1', mockUser)).rejects.toThrow(
         'Aucun événement trouvé',
       );
     });
@@ -80,7 +87,7 @@ describe('BehaviorAnalysisController', () => {
     it('should analyze all sessions and return count', async () => {
       mockAnalysisService.analyzeOrganizationSessions.mockResolvedValue(150);
 
-      const result = await controller.analyzeOrganization('org-uuid-1');
+      const result = await controller.analyzeOrganization('org-uuid-1', mockUser);
 
       expect(result).toEqual({
         success: true,
@@ -93,7 +100,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return 0 when no sessions', async () => {
       mockAnalysisService.analyzeOrganizationSessions.mockResolvedValue(0);
 
-      const result = await controller.analyzeOrganization('org-empty');
+      const result = await controller.analyzeOrganization('org-uuid-1', mockUser);
 
       expect(result.processedSessions).toBe(0);
     });
@@ -114,7 +121,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return organization stats', async () => {
       mockAnalysisService.getOrganizationStats.mockResolvedValue(mockStats);
 
-      const result = await controller.getOrganizationStats('org-uuid-1');
+      const result = await controller.getOrganizationStats('org-uuid-1', mockUser);
 
       expect(result).toEqual({ success: true, stats: mockStats });
       expect(mockAnalysisService.getOrganizationStats).toHaveBeenCalledWith('org-uuid-1');
@@ -131,7 +138,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return time series data with default days', async () => {
       mockAnalysisService.getTimeSeriesData.mockResolvedValue(mockTrends);
 
-      const result = await controller.getTimeSeries('org-uuid-1', 30);
+      const result = await controller.getTimeSeries('org-uuid-1', 30, mockUser);
 
       expect(result).toEqual({ success: true, days: 30, data: mockTrends });
       expect(mockAnalysisService.getTimeSeriesData).toHaveBeenCalledWith('org-uuid-1', 30);
@@ -140,7 +147,7 @@ describe('BehaviorAnalysisController', () => {
     it('should pass custom days parameter', async () => {
       mockAnalysisService.getTimeSeriesData.mockResolvedValue([]);
 
-      const result = await controller.getTimeSeries('org-uuid-1', 7);
+      const result = await controller.getTimeSeries('org-uuid-1', 7, mockUser);
 
       expect(result.days).toBe(7);
       expect(mockAnalysisService.getTimeSeriesData).toHaveBeenCalledWith('org-uuid-1', 7);
@@ -157,7 +164,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return ML dataset with count', async () => {
       mockAnalysisService.prepareMLDataset.mockResolvedValue(mockDataset);
 
-      const result = await controller.getMLDataset('org-uuid-1');
+      const result = await controller.getMLDataset('org-uuid-1', mockUser);
 
       expect(result).toEqual({
         success: true,
@@ -170,7 +177,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return empty dataset', async () => {
       mockAnalysisService.prepareMLDataset.mockResolvedValue([]);
 
-      const result = await controller.getMLDataset('org-uuid-1');
+      const result = await controller.getMLDataset('org-uuid-1', mockUser);
 
       expect(result.count).toBe(0);
       expect(result.dataset).toEqual([]);
@@ -184,7 +191,7 @@ describe('BehaviorAnalysisController', () => {
     it('should return CSV export with filename', async () => {
       mockAnalysisService.exportMLData.mockResolvedValue(mockCsv);
 
-      const result = await controller.exportMLData('org-uuid-1');
+      const result = await controller.exportMLData('org-uuid-1', mockUser);
 
       expect(result.success).toBe(true);
       expect(result.contentType).toBe('text/csv');

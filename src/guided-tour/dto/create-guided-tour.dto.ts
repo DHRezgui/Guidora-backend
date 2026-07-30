@@ -41,6 +41,17 @@ export class CreateGuidedTourDto {
   })
   isActive?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  @ApiProperty({
+    description:
+      'When true, the tour appears in the Aide Guides catalog for production pages. Independent of isActive / autostart.',
+    example: false,
+    required: false,
+    default: false,
+  })
+  showInGuides?: boolean;
+
   @IsNumber()
   @IsOptional()
   @ApiProperty({ 

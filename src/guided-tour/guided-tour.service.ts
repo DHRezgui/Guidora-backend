@@ -100,6 +100,7 @@ import {
   isDeveloperOwnedSandboxTour,
   isSdkTokenActor,
   resolveCreateTourEnvironment,
+  resolveShowInGuidesForWrite,
   type TourActivationAudience,
   type TourPermissionActor,
   type TourRuntimeContext,
@@ -1023,27 +1024,6 @@ export class GuidedTourService {
       reasons.push('stable_selector_coverage_too_low');
     }
 
-    // [TEMP DEBUG] Log selectors when quality rejection happens so we can
-    // tune isActionableSelector / isStableSelector against real-world output
-    // from the SDK selector builder.
-    if (reasons.length > 0) {
-      const dbg = {
-        draftId: (draft as { id?: string }).id ?? '(no-id)',
-        intent: draft.intent,
-        primarySelector,
-        primaryStable,
-        primaryFragile,
-        allowFingerprintBridge,
-        stableSteps,
-        minStableSteps: threshold.minStableSteps,
-        requiredStableSteps,
-        reasons,
-        allSelectors: steps.map((s) => s.targetSelector),
-      };
-      // eslint-disable-next-line no-console
-      console.log('[QUALITY-REJECT]', JSON.stringify(dbg));
-    }
-
     if (scenario === ContextualScenario.DYNAMIC || scenario === ContextualScenario.STRESS) {
       const rejectedNoise = this.extractRejectedNoiseMetric(draft);
       if (rejectedNoise !== undefined && rejectedNoise <= 0) {
@@ -1718,8 +1698,10 @@ export class GuidedTourService {
     }
 
     // Créer le tour (sans les steps pour éviter cascade avec orderIndex null)
+    const showInGuides = resolveShowInGuidesForWrite(createTourDto.showInGuides, actor) ?? false;
     const tour = this.tourRepository.create({
       ...tourData,
+      showInGuides,
       organizationId,
       createdBy,
       environment,
@@ -2666,6 +2648,9 @@ export class GuidedTourService {
       }
     }
     if (updateTourDto.priority !== undefined) tour.priority = updateTourDto.priority;
+    if (updateTourDto.showInGuides !== undefined) {
+      tour.showInGuides = resolveShowInGuidesForWrite(updateTourDto.showInGuides, actor)!;
+    }
     if (updateTourDto.triggerConditions !== undefined) {
       tour.triggerConditions = { ...tour.triggerConditions, ...updateTourDto.triggerConditions };
     }
@@ -2802,7 +2787,9 @@ export class GuidedTourService {
       tour.sandboxTestStartedBy = preserveSandboxTest
         ? (tour.sandboxTestStartedBy ?? tour.createdBy ?? actor?.id ?? null)
         : null;
+      // Same as activation: Guide catalog is an explicit prod opt-in after transfer.
       tour.isActive = false;
+      tour.showInGuides = false;
       await this.clearTourSharingGrantsAndLock(tour.id);
       if (isAdminOriginatedTour(tour)) {
         tour.productionManagedByAdminId = tour.createdBy ?? actor?.id ?? null;
@@ -2822,6 +2809,8 @@ export class GuidedTourService {
     tour.isActive = false;
     tour.isSandboxTestActive = false;
     tour.sandboxTestStartedBy = null;
+    // Guides is production-only curation — clear on sandbox return (mirrors isActive).
+    tour.showInGuides = false;
     if (fromProduction && isAdminOriginatedTour(tour)) {
       tour.productionManagedByAdminId = null;
     }
@@ -2878,16 +2867,24 @@ export class GuidedTourService {
     url: string,
     organizationId: string,
     environment: TourEnvironment,
-    options?: { createdBy?: string },
+    options?: { createdBy?: string; showInGuidesOnly?: boolean; requireActive?: boolean },
   ): Promise<GuidedTour[]> {
+    const requireActive = options?.requireActive !== false;
     const query = this.tourRepository
       .createQueryBuilder('tour')
       .leftJoinAndSelect('tour.steps', 'step')
       .where('tour.organization_id = :organizationId', { organizationId })
       .andWhere('tour.target_url = :url', { url })
-      .andWhere('tour.is_active = :isActive', { isActive: true })
       .andWhere('tour.environment = :environment', { environment })
       .orderBy('tour.priority', 'DESC');
+
+    if (requireActive) {
+      query.andWhere('tour.is_active = :isActive', { isActive: true });
+    }
+
+    if (options?.showInGuidesOnly) {
+      query.andWhere('tour.show_in_guides = :showInGuides', { showInGuides: true });
+    }
 
     if (options?.createdBy) {
       query.andWhere('tour.created_by = :createdBy', { createdBy: options.createdBy });
@@ -2901,8 +2898,9 @@ export class GuidedTourService {
     url: string,
     organizationId: string,
     userId: string,
+    options?: { showInGuidesOnly?: boolean },
   ): Promise<GuidedTour[]> {
-    return this.tourRepository
+    const query = this.tourRepository
       .createQueryBuilder('tour')
       .leftJoinAndSelect('tour.steps', 'step')
       .innerJoin(
@@ -2916,34 +2914,55 @@ export class GuidedTourService {
       .andWhere('tour.is_active = :isActive', { isActive: true })
       .andWhere('tour.environment = :environment', { environment: TourEnvironment.SANDBOX })
       .andWhere('tour.created_by != :userId', { userId })
-      .orderBy('tour.priority', 'DESC')
-      .getMany();
+      .orderBy('tour.priority', 'DESC');
+
+    if (options?.showInGuidesOnly) {
+      query.andWhere('tour.show_in_guides = :showInGuides', { showInGuides: true });
+    }
+
+    return query.getMany();
   }
 
   private async querySandboxTestProductionToursForUrl(
     url: string,
     organizationId: string,
+    options?: { showInGuidesOnly?: boolean },
   ): Promise<GuidedTour[]> {
-    return this.tourRepository
+    const query = this.tourRepository
       .createQueryBuilder('tour')
       .leftJoinAndSelect('tour.steps', 'step')
       .where('tour.organization_id = :organizationId', { organizationId })
       .andWhere('tour.target_url = :url', { url })
       .andWhere('tour.environment = :environment', { environment: TourEnvironment.PRODUCTION })
       .andWhere('tour.is_sandbox_test_active = :isSandboxTestActive', { isSandboxTestActive: true })
-      .orderBy('tour.priority', 'DESC')
-      .getMany();
+      .orderBy('tour.priority', 'DESC');
+
+    if (options?.showInGuidesOnly) {
+      query.andWhere('tour.show_in_guides = :showInGuides', { showInGuides: true });
+    }
+
+    return query.getMany();
   }
 
-  // Trouver les parcours actifs pour une URL cible
-  async findActiveToursForUrl(
+  private async collectRuntimeToursForUrl(
     url: string,
     organizationId: string,
-    userId?: string,
-    runtime?: TourRuntimeContext,
-  ): Promise<GuidedTour[]> {
+    userId: string | undefined,
+    runtime: TourRuntimeContext | undefined,
+    options?: { showInGuidesOnly?: boolean },
+  ): Promise<{
+    productionTours: GuidedTour[];
+    sandboxTours: GuidedTour[];
+    sandboxTestProductionTours: GuidedTour[];
+  }> {
+    const queryOpts = options?.showInGuidesOnly ? { showInGuidesOnly: true as const } : undefined;
+
+    // Prod Guides: showInGuides alone (inactive OK). Autostart / sandbox still require isActive.
     const productionTours = filterProductionRuntimeTours(
-      await this.queryActiveToursForUrl(url, organizationId, TourEnvironment.PRODUCTION),
+      await this.queryActiveToursForUrl(url, organizationId, TourEnvironment.PRODUCTION, {
+        ...queryOpts,
+        requireActive: options?.showInGuidesOnly ? false : true,
+      }),
       userId ?? runtime?.userId,
     );
 
@@ -2951,6 +2970,7 @@ export class GuidedTourService {
     let sandboxTestProductionTours: GuidedTour[] = [];
     if (hasSandboxRuntimeAccess(runtime)) {
       sandboxTours = await this.queryActiveToursForUrl(url, organizationId, TourEnvironment.SANDBOX, {
+        ...queryOpts,
         createdBy: runtime?.userRole === UserRole.DEVELOPER ? runtime?.userId : undefined,
       });
       if (runtime?.userId) {
@@ -2958,6 +2978,7 @@ export class GuidedTourService {
           url,
           organizationId,
           runtime.userId,
+          queryOpts,
         );
         const seenSandboxIds = new Set(sandboxTours.map((t) => t.id));
         for (const shared of sharedSandboxTours) {
@@ -2967,8 +2988,25 @@ export class GuidedTourService {
           }
         }
       }
-      sandboxTestProductionTours = await this.querySandboxTestProductionToursForUrl(url, organizationId);
+      sandboxTestProductionTours = await this.querySandboxTestProductionToursForUrl(
+        url,
+        organizationId,
+        queryOpts,
+      );
     }
+
+    return { productionTours, sandboxTours, sandboxTestProductionTours };
+  }
+
+  // Trouver les parcours actifs pour une URL cible
+  async findActiveToursForUrl(
+    url: string,
+    organizationId: string,
+    userId?: string,
+    runtime?: TourRuntimeContext,
+  ): Promise<GuidedTour[]> {
+    const { productionTours, sandboxTours, sandboxTestProductionTours } =
+      await this.collectRuntimeToursForUrl(url, organizationId, userId, runtime);
 
     const allCandidates = [...productionTours, ...sandboxTours, ...sandboxTestProductionTours];
 
@@ -3046,6 +3084,42 @@ export class GuidedTourService {
       }
     }
 
+    return merged;
+  }
+
+  /**
+   * Catalogue Aide > Guides :
+   * - Production : `showInGuides` (isActive optionnel — catalogue on-demand ≠ autostart)
+   * - Sandbox / sandbox-test : toujours isActive / test actif (preview développeur)
+   * Sans filtrer les parcours déjà terminés (Relancer on-demand).
+   */
+  async findGuideToursForUrl(
+    url: string,
+    organizationId: string,
+    userId?: string,
+    runtime?: TourRuntimeContext,
+  ): Promise<GuidedTour[]> {
+    const { productionTours, sandboxTours, sandboxTestProductionTours } =
+      await this.collectRuntimeToursForUrl(url, organizationId, userId, runtime, {
+        showInGuidesOnly: true,
+      });
+
+    const allCandidates = [...productionTours, ...sandboxTours, ...sandboxTestProductionTours];
+
+    if (runtime?.userId && allCandidates.length > 0) {
+      await this.attachActorAccessGrantsToTours(allCandidates, runtime.userId);
+    }
+
+    const merged: GuidedTour[] = [];
+    const seen = new Set<string>();
+    for (const tour of allCandidates) {
+      if (!seen.has(tour.id)) {
+        merged.push(tour);
+        seen.add(tour.id);
+      }
+    }
+
+    merged.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     return merged;
   }
 

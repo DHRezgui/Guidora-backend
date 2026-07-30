@@ -174,6 +174,7 @@ export class BehaviorAnalysisService {
 
   //  Obtenir les tendances temporelles
   async getTimeSeriesData(organizationId: string, days = 30): Promise<any[]> {
+    const safeDays = Math.min(365, Math.max(1, Math.floor(Number(days) || 30)));
     const query = `
       SELECT 
         DATE_TRUNC('day', ba.analyzed_at) as date,
@@ -185,12 +186,12 @@ export class BehaviorAnalysisService {
         COUNT(CASE WHEN ba.help_triggered = true THEN 1 END) as help_count
       FROM behavior_analysis ba
       WHERE ba.organization_id = $1
-        AND ba.analyzed_at >= NOW() - INTERVAL '${days} days'
+        AND ba.analyzed_at >= NOW() - ($2 * INTERVAL '1 day')
       GROUP BY DATE_TRUNC('day', ba.analyzed_at)
       ORDER BY date DESC
     `;
 
-    return this.dataSource.query(query, [organizationId]);
+    return this.dataSource.query(query, [organizationId, safeDays]);
   }
 
   // Méthodes privées d'analyse

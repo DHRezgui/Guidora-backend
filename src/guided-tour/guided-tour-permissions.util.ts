@@ -224,6 +224,28 @@ export function assertDeveloperSandboxUpdateAllowed(
   }
 }
 
+/**
+ * Curation Aide > Guides : seuls les ADMIN peuvent activer `showInGuides`.
+ * `false` / omission restent autorisés pour tout acteur (défaut sûr).
+ */
+export function resolveShowInGuidesForWrite(
+  requested: boolean | undefined,
+  actor?: TourPermissionActor,
+): boolean | undefined {
+  if (requested === undefined) {
+    return undefined;
+  }
+  if (isAdminActor(actor)) {
+    return requested;
+  }
+  if (requested === true) {
+    throw new ForbiddenException(
+      'Seul un administrateur peut afficher un parcours dans Guides (Aide).',
+    );
+  }
+  return false;
+}
+
 export function assertDeveloperUpdateAllowed(
   tour: Pick<
     GuidedTour,
