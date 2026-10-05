@@ -829,12 +829,12 @@ export class GuidedTourService {
         detailReasons.push('ownership_transferred');
       } else {
         tour = await this.create(
-          {
-            name: draft.name,
-            description: draft.description,
-            targetUrl: draft.targetUrl,
-            isActive: shouldActivate,
-            priority: Math.max(0, Math.round(draft.score)),
+        {
+          name: draft.name,
+          description: draft.description,
+          targetUrl: draft.targetUrl,
+          isActive: shouldActivate,
+          priority: Math.max(0, Math.round(draft.score)),
             triggerConditions: this.buildContextualPublishTriggerConditions({
               draft,
               dto,
@@ -845,15 +845,15 @@ export class GuidedTourService {
               activationPolicy,
               publishedByRole: contextualPublishedByRole,
             }),
-            simulationContext: this.extractSimulationContext(draft.metadata),
+          simulationContext: this.extractSimulationContext(draft.metadata),
             steps: mappedSteps,
-          },
-          organizationId,
-          createdBy,
-          actor,
-        );
+        },
+        organizationId,
+        createdBy,
+        actor,
+      );
         detailOutcome = shouldActivate ? 'activated' : 'created';
-        created += 1;
+      created += 1;
       }
 
       if (shouldActivate) {
@@ -873,7 +873,7 @@ export class GuidedTourService {
       if (existingIndex >= 0) {
         existingTours[existingIndex] = tour;
       } else {
-        existingTours.push(tour);
+      existingTours.push(tour);
       }
 
       await this.registerFaqProjectForContextualDraft(organizationId, draft);
