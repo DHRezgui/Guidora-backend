@@ -1,98 +1,95 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Guidora Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+The Guidora backend is a NestJS API for the multi-tenant onboarding platform.
+It provides authentication, organization and project management, guided-tour
+authoring and delivery, contextual help, FAQ search, event tracking, analytics,
+and abandonment-risk prediction.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Repository: [DHRezgui/Guidora-backend](https://github.com/DHRezgui/Guidora-backend)
 
-## Description
+## Requirements
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- Node.js 20 or newer
+- npm
+- PostgreSQL 15 or newer
+- Redis 7 or newer
+- RabbitMQ 3 when asynchronous tracking is enabled
 
-## Project setup
+For the complete local stack, use the parent repository and Docker Compose.
+
+## Install
 
 ```bash
-$ npm install
+npm install
 ```
 
-## Compile and run the project
+Create a local environment file from `.env.test.example` when running tests:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cp .env.test.example .env.test
 ```
 
-## Run tests
+Do not commit `.env`, `.env.test`, or any file containing real credentials.
+
+## Run locally
+
+The API expects PostgreSQL and the optional Redis/RabbitMQ services to be
+available. Start it in watch mode with:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run start:dev
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Other useful commands:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm run build
+npm run start:prod
+npm run start:worker
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+When started directly, the API uses the configured `PORT` and exposes the
+versioned API under `/api/v1`. The Docker Compose development stack maps the
+API to `http://localhost:3020`; the root production-style stack maps it to
+`http://localhost:3002`.
 
-## Resources
+Interactive API documentation is available at `/api/v1/docs` when Swagger is
+enabled, for example `http://localhost:3002/api/v1/docs`.
 
-Check out a few resources that may come in handy when working with NestJS:
+## Main capabilities
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- Multi-tenant organizations, users, projects, and roles.
+- Guided-tour creation, publishing, access control, and sandbox workflows.
+- SDK authentication and event tracking, including batch tracking.
+- Contextual feedback, journey blueprints, and analytics aggregation.
+- FAQ search with lexical and semantic retrieval.
+- Optional LightGBM abandonment prediction and model health checks.
+- Background tracking through RabbitMQ and Redis-backed coordination.
 
-## Support
+## Tests and quality checks
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+npm test
+npm run test:cov
+npm run test:e2e
+npm run test:e2e:sdk
+npm run lint
+```
 
-## Stay in touch
+`npm run lint` uses ESLint with autofix. Review the resulting changes before
+committing them.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## API and integration notes
 
-## License
+The React SDK consumes the backend through the public API and ML routes. The
+exact request and response contracts are documented in the source controllers,
+Swagger output, and the ML integration notes under `src/ml/`.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+For a working backend, dashboard, database, and SDK setup, see the parent
+[Guidora workspace README](https://github.com/DHRezgui/Guidora).
+
+## Security
+
+Use strong secrets and non-default service credentials outside local
+development. Restrict administrative and ML prediction routes according to
+the configured roles and SDK token scopes.
